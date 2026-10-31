@@ -1,0 +1,28 @@
+/* HILL PATROL — page chrome.
+   The game itself is drawn on the canvas; this file only controls
+   how the canvas sits in the browser window. */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: #000;
+  overflow: hidden;
+}
+
+#game {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  /* Keep the chunky Atari pixels sharp when the low-res buffer
+     is scaled up to fill the window. */
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background: #000;
+  cursor: crosshair;
+}
