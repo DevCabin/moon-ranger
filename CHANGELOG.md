@@ -6,6 +6,26 @@ The versions below map one-to-one to the conversation in which the game was buil
 
 ---
 
+## [0.1.1] — Boss ordnance
+
+- Patrol bosses now throw ordnance as well as aimed shots: **1 aimed missile**
+  at sector 15, **2** at 20, **1 heat seeker** at 25, **2** at 30 and **3** from
+  35 on, up to four live at once (five from 35). Campaign bosses never fire
+  these.
+- Boss missiles are slow and **shootable** — one player bullet destroys one —
+  and they disappear the instant the boss dies. They freeze with the world in
+  the shop and pause screens.
+- The heat-seeker turn rate was set by measurement, not guesswork: at 1.8 rad/s
+  a jump dodged it from any distance, so it was dropped to 1.0, where a jump
+  timed mid-approach makes it overshoot while jumping early or at the last
+  instant still gets you hit.
+- Shields now cost more as the Patrol deepens: +15% of base per sector past 10,
+  rounded to the nearest 10 (120 / 350 at sector 11, 180 / 530 at sector 15).
+  Missile and heat-seeker prices are unchanged.
+- Fix: a recurring octopus could re-trigger the MOON SAVED freeze if the run had
+  not registered a campaign clear. The milestone is now limited to the campaign
+  octopus.
+
 ## [0.1.0] — The Patrol: endless sectors
 
 - The run no longer ends at the Octopus. Beating it shows **MOON SAVED**, then

@@ -166,28 +166,28 @@ if you add a section.
 | # | Section | Start | What it does |
 | --- | --- | --- | --- |
 | 1 | CONFIG | [L38](game.js#L38) | Every tunable number. Rebalancing should not require touching logic. |
-| 1b | MODIFIERS | [L177](game.js#L177) | The eight Patrol sector modifiers and their values. |
-| 2 | PALETTE | [L191](game.js#L191) | `COLORS`, including the five rotating rover colorways and the boss colors. |
-| 3 | AUDIO | [L244](game.js#L244) | `AudioSys`: square-wave beeps and filtered noise, lazily created on first input, mute persisted to `localStorage`. |
-| 4 | INPUT | [L318](game.js#L318) | `Keys` (held) and `Pressed` (edge-triggered) maps, plus helpers. |
-| 5 | TERRAIN | [L356](game.js#L356) | `groundY()` / `slope()` / difficulty `ramp()`. |
-| 6 | ENTITIES | [L391](game.js#L391) | `Jeep` singleton, pools, spawners, bosses, `damageJeep()`, particles. |
-| 7 | GAME STATE | [L739](game.js#L739) | `Game` object: state string, currency, sector, difficulty helpers, transitions. |
-| 8 | UPDATE | [L1016](game.js#L1016) | The fixed-step simulation. The biggest function in the file. |
-| 9 | RENDER | [L1564](game.js#L1564) | Pixel font, starfield, terrain drawing, all entity drawing, HUD, overlays. |
-| 10 | MAIN LOOP | [L2373](game.js#L2373) | Debug handle, pointer input, fullscreen, letterbox resizing, the frame loop. |
+| 1b | MODIFIERS | [L191](game.js#L191) | The eight Patrol sector modifiers and their values. |
+| 2 | PALETTE | [L205](game.js#L205) | `COLORS`, including the five rotating rover colorways and the boss colors. |
+| 3 | AUDIO | [L258](game.js#L258) | `AudioSys`: square-wave beeps and filtered noise, lazily created on first input, mute persisted to `localStorage`. |
+| 4 | INPUT | [L333](game.js#L333) | `Keys` (held) and `Pressed` (edge-triggered) maps, plus helpers. |
+| 5 | TERRAIN | [L371](game.js#L371) | `groundY()` / `slope()` / difficulty `ramp()`. |
+| 6 | ENTITIES | [L406](game.js#L406) | `Jeep` singleton, pools, spawners, bosses, `damageJeep()`, particles. |
+| 7 | GAME STATE | [L799](game.js#L799) | `Game` object: state string, currency, sector, difficulty helpers, transitions. |
+| 8 | UPDATE | [L1084](game.js#L1084) | The fixed-step simulation. The biggest function in the file. |
+| 9 | RENDER | [L1710](game.js#L1710) | Pixel font, starfield, terrain drawing, all entity drawing, HUD, overlays. |
+| 10 | MAIN LOOP | [L2558](game.js#L2558) | Debug handle, pointer input, fullscreen, letterbox resizing, the frame loop. |
 
 ### Reading order recommendation
 
 1. `CONFIG` → `MODIFIERS` → `COLORS`: learn the vocabulary. Half the game is names and
    numbers.
-2. `Terrain.groundY()` ([L356](game.js#L356)): 15 lines, and suddenly hills make sense.
-3. `Jeep` ([L391](game.js#L391)): the player's whole data model.
-4. `Game` ([L739](game.js#L739)): the state machine, the sector helpers, the transitions.
-5. `update()` ([L1016](game.js#L1016)): read it in phases; don't try to hold 600 lines at once.
-6. `drawText()` + `render()` ([L1579](game.js#L1579), [L1606](game.js#L1606)): there is no
+2. `Terrain.groundY()` ([L371](game.js#L371)): 15 lines, and suddenly hills make sense.
+3. `Jeep` ([L406](game.js#L406)): the player's whole data model.
+4. `Game` ([L799](game.js#L799)): the state machine, the sector helpers, the transitions.
+5. `update()` ([L1084](game.js#L1084)): read it in phases; don't try to hold 600 lines at once.
+6. `drawText()` + `render()` ([L1725](game.js#L1725), [L1752](game.js#L1752)): there is no
    `ctx.fillText` anywhere — all text is a hand-drawn 3×5 bitmap font.
-7. `frame()` ([L2385](game.js#L2385)): the loop, and you're done.
+7. `frame()` ([L2572](game.js#L2572)): the loop, and you're done.
 
 ## 6. Coordinate systems and hitboxes
 
@@ -219,6 +219,7 @@ Sizes (all pixels in the 480×270 buffer):
 | Octopus boss | 112 × 70 | Hovers around y 81 |
 | Bullet (yours) | 2 × 2 | Drawn 2×2 |
 | Bullet (enemy) | 4 × 4 | Boss shots are a small sprite, but the hitbox is still a point |
+| Boss missile | 9 × 6 | Drawn rotated along its velocity; hitbox is an 8×8 box |
 
 Ground height is `viewH * 0.80` = 216 px, modulated by hills whose amplitude grows from
 6 px (level 1) to 46 px (level 10). The jeep body's `y` is the **top** of the body; its
@@ -229,7 +230,7 @@ wheels extend ~6 px below it, and the ground contact point used for tilting is
 
 ### The `Game` singleton
 
-Everything that survives a frame lives on `Game` ([L739](game.js#L739)) or `Jeep`.
+Everything that survives a frame lives on `Game` ([L799](game.js#L799)) or `Jeep`.
 Highlights:
 
 | Field | Meaning |
@@ -256,7 +257,7 @@ Highlights:
 ### Entities and pools
 
 There are three pools — bullets, enemies, sparks — created by
-[`makePool()`](game.js#L441). Objects are never allocated during play:
+[`makePool()`](game.js#L456). Objects are never allocated during play:
 
 ```js
 const b = bulletPool.get();   // reuse or create
@@ -279,7 +280,7 @@ budget for it explicitly instead of removing that check.
 
 ### The death path
 
-All player damage funnels through [`damageJeep()`](game.js#L470):
+All player damage funnels through [`damageJeep()`](game.js#L486):
 
 ```
 invulnerable?  → ignore
@@ -294,13 +295,13 @@ hazard, call this — never set the state to `"gameover"` directly.
 
 Campaign bosses guard sectors 3, 7 and 10 (`CONFIG.bosses`). Patrol bosses return every
 5 sectors from 15. Both paths go through
-[`bossForSector(sector)`](game.js#L558), which returns a resolved descriptor
+[`bossForSector(sector)`](game.js#L574), which returns a resolved descriptor
 (`kind`, `name`, size, `hover`, `heatOnly`, `occurrence`, `recurring`, elite flags) or
 `null`. Everything else — the finish-line hold, the modifier exclusion, `spawnBoss()` —
 asks that function, so the schedule lives in exactly one place.
 
 - `update()` holds the finish line while `bossForSector(Game.sector)` is non-null and
-  `Game.bossDefeated` is false, calling [`spawnBoss()`](game.js#L585) once. That is what
+  `Game.bossDefeated` is false, calling [`spawnBoss()`](game.js#L637) once. That is what
   stops the sector advancing.
 - A boss is an ordinary entry in `enemies` with `type: "boss"`, so drawing, collision and
   homing reuse the existing loops. It carries `bossKind` (`spider` / `crab` /
@@ -313,19 +314,22 @@ asks that function, so the schedule lives in exactly one place.
   a second-visit spider is 38–75 and a second-visit octopus is 25.
 - Elite traits are set from `occurrence`: `frenzied` from the 2nd (aimed shots at
   `bossFrenzyFireScale` = 0.75× the gap), `shielded` from the 3rd (regains 1 HP every
-  `bossShieldRegen` = 6 s, and [`damageBoss()`](game.js#L633) resets that timer on every
+  `bossShieldRegen` = 6 s, and [`damageBoss()`](game.js#L691) resets that timer on every
   hit). The HUD prints `e.elite` next to the boss name.
 - `damageBoss(e, fromHeat)` is the single damage gate: it rejects non-heat hits on a
   `heatOnly` boss, decrements HP, restarts the shield clock, pays the bounty on death,
   and then either calls `Game.milestone()` (first octopus) or `nextLevel()`.
 - Boss shots copy `bossKind` onto the bullet at spawn (so it survives the boss dying and
-  being pooled) and draw through [`drawBossBullet()`](game.js#L2063) as a miniature of the
+  being pooled) and draw through [`drawBossBullet()`](game.js#L2248) as a miniature of the
   creature with a pulsing halo.
 - While `Game.bossActive`, scroll drops to `bossScrollFactor` and regular spawning and
   bomber arrivals are skipped. Meteorites keep falling on their own faster cadence
   (`bossMeteorMinGap`/`MaxGap`) and land between the jeep and the creature.
-- The health bar lives in [`drawHUD()`](game.js#L2178) and only draws during `play`,
+- The health bar lives in [`drawHUD()`](game.js#L2363) and only draws during `play`,
   `pause` and `shop`.
+- Patrol bosses also fire ordnance (`e.ord`, the separate `foeMissiles` array);
+  the ladder, the tuning notes and the shoot-down rules are in
+  [section 9](#9-sectors-modifiers-and-the-patrol).
 
 Testing catch: jumping sectors from the console while a boss is alive leaves
 `bossActive` true, so the next sector's boss never spawns. Clear `enemies` and reset both
@@ -382,6 +386,12 @@ Other fixed numbers worth knowing:
   (+25% per repeat); the octopus 20 heat-seeker hits (+25% per repeat). Each pays 900.
   While one is alive the scroll drops to 35%, the finish line holds, and meteorites fall
   every 3.5–6.5 s.
+- **Boss ordnance:** from sector 15 — one aimed missile (150 px/s), two from 20, one
+  heat seeker (115 px/s, 1.0 rad/s turn) from 25, two from 30, three from 35. Volleys
+  every 4.5–6 s; at most 4 alive (5 from 35); each lives 6–7 s.
+- **Shield prices scale past sector 10:** `base × (1 + 0.15 × (sector − 10))`, rounded
+  to 10s. 100/300 stay 100/300 through level 10, then 120/350 at 11 and 180/530 at 15.
+  Missiles (300) and heat seekers (500) never change price.
 
 ## 9. Sectors, modifiers, and the Patrol
 
@@ -419,7 +429,7 @@ Do **not** start a third place that does its own `sector` arithmetic.
 
 ### Modifiers
 
-`MODIFIERS` ([L177](game.js#L177)) is a flat table; ids are the keys and are stored in
+`MODIFIERS` ([L191](game.js#L191)) is a flat table; ids are the keys and are stored in
 `Game.modifier`:
 
 ```js
@@ -435,7 +445,7 @@ const MODIFIERS = {
 };
 ```
 
-Selection happens in [`pickModifier()`](game.js#L786), called by `nextLevel()` **before**
+Selection happens in [`pickModifier()`](game.js#L846), called by `nextLevel()` **before**
 `scheduleBombers()` (the bomber schedule depends on scroll speed, which depends on the
 modifier):
 
@@ -462,9 +472,40 @@ The HUD prints the name under the power-up row, and the banner appends ` - NAME`
 Modifier banners sit on a translucent dark band because they are long enough to land on a
 passing saucer.
 
+### Boss ordnance
+
+From sector 15 the bosses also throw missiles. `bossOrdnance(sector)` decides the stage;
+it is keyed off the **sector**, not the creature, so the same spider opens with one aimed
+missile at 15 and three heat seekers at 35.
+
+| Sector | Volley | Cadence | Max live |
+| --- | --- | --- | --- |
+| 15 | 1 aimed missile | 3.5–4.5 s | 4 |
+| 20 | 2 aimed missiles | 3.5–4.5 s | 4 |
+| 25 | 1 heat seeker | 5.0–6.0 s | 4 |
+| 30 | 2 heat seekers | 5.0–6.0 s | 4 |
+| 35+ | 3 heat seekers | 4.5–5.5 s | 5 |
+
+- They live in `foeMissiles`, a plain array kept separate from the player's `missiles`:
+  different targeting, rendering and collision rules.
+- `spawnFoeMissile(boss, heat)` aims at the jeep's current centre. Heat seekers then
+  steer at `foeHeatTurnRate` and expire after `foeHeatLife`.
+- Both kinds are **shootable** — one player bullet or missile each — explode on terrain,
+  and use a padded point test against the jeep into `damageJeep()`.
+- Salvo state (`ordTimer`, `ordSalvo`, `ordSalvoTimer`) lives on the enemy and is reset in
+  `spawnBoss()`; a pooled boss must never inherit a half-fired volley.
+- `damageBoss()` calls `clearFoeMissiles()` on death. They also freeze with the world in
+  the shop and pause screens, because `update()` returns early there.
+
+**The turn rate is load-bearing.** Measured: at 1.8 rad/s a jump dodged a heat seeker
+from any distance, which made them decorative; at 1.0 a mid-approach jump makes it
+overshoot while jumping early (~100 px out) or at the last instant (~20 px) still gets
+you hit. Change that number only with a dodge test (harness in
+[section 10](#10-debugging-and-testing-recipes)).
+
 ### The milestone, and why it is not a state
 
-The first octopus death calls `Game.milestone()` ([L950](game.js#L950)) instead of
+The first octopus death calls `Game.milestone()` ([L1018](game.js#L1018)) instead of
 `nextLevel()`:
 
 1. `cleared = true`, `moonranger_cleared` persisted (first time only).
@@ -476,7 +517,7 @@ ignored — deliberately, like the game-over screen. When it expires, `clearPres
 and `nextLevel()` moves to sector 11 with the `PATROL BEGINS` banner (once per run, via
 `patrolAnnounced`).
 
-`render()` draws [`drawMilestone()`](game.js#L2303) whenever `winFlash > 0`, before the
+`render()` draws [`drawMilestone()`](game.js#L2488) whenever `winFlash > 0`, before the
 banner branch. There is no `"victory"` state any more.
 
 ### Persistence
@@ -493,7 +534,7 @@ banner branch. There is no `"victory"` state any more.
 ## 10. Debugging and testing recipes
 
 There are no tests, so the fastest way to verify behavior is from the devtools console.
-The game exposes a handle ([L2373](game.js#L2373)):
+The game exposes a handle ([L2558](game.js#L2558)):
 
 ```js
 GAME.Game              // state, score, sector, distance, modifier, depth...
@@ -502,14 +543,16 @@ GAME.Terrain           // level, groundY(worldX), slope(worldX), ramp()
 GAME.CONFIG            // live-tweakable: change a number and feel it immediately
 GAME.MODIFIERS         // the modifier table
 GAME.enemies           // live array (getter)
-GAME.bullets           // live array (getter)
-GAME.meteors           // live array (getter)
-GAME.missiles          // live array (getter)
+GAME.bullets           // live array (getter)GAME.meteors          // live array (getter)
+GAME.missiles         // live array (getter)
+GAME.foeMissiles      // live boss ordnance (getter)
 GAME.spawnEnemy(type, worldOffset)   // "ground" | "air" | "bomber"
 GAME.spawnBullet(x, y, vx, vy, friendly, owner)
 GAME.spawnMeteor(minFrac, maxFrac)
 GAME.spawnBoss(sector)               // sector must actually have a boss
 GAME.bossForSector(sector)           // null, or the resolved boss descriptor
+GAME.bossOrdnance(sector)            // null, or { heat, volley, gap, maxLive }
+GAME.spawnFoeMissile(boss, heat)     // fire one piece of boss ordnance
 GAME.damageBoss(boss, fromHeat)      // true heat damage / false otherwise
 ```
 
@@ -549,6 +592,11 @@ const b = GAME.spawnBoss(30);
 b.entry = 0; b.x = b.baseX;          // skip the fly-in
 b.hp = 1; GAME.damageBoss(b, false); // instant kill
 
+// Ordnance on demand: fire a volley now and inspect it
+const b2 = GAME.spawnBoss(35); b2.entry = 0; b2.x = b2.baseX; b2.ordTimer = 0;
+GAME.foeMissiles;                     // live missiles
+GAME.CONFIG.foeHeatTurnRate = 1.6;    // feel a wider/narrower dodge window live
+
 // Freeze the world and inspect draw code while paused
 GAME.Game.state = "pause";
 ```
@@ -570,19 +618,19 @@ and the Patrol caps (`scrollCap`, `spawnScaleFloor`, `fireScaleFloor`,
 ### Add a new ground enemy
 
 1. Add its colors to `COLORS`.
-2. Add a `type` branch in [`spawnEnemy()`](game.js#L505): set `w`, `h`, `y`,
+2. Add a `type` branch in [`spawnEnemy()`](game.js#L521): set `w`, `h`, `y`,
    `fireTimer`, and any `hp`. Set `hp`/`maxHp` explicitly even if it is 1 — pooled
    objects keep old values.
 3. Add its movement in the enemies loop of `update()`, and make sure its `y` is re-snapped
    to `Terrain.groundY(...)` if it walks.
-4. Add a `drawEnemy()` branch ([L1798](game.js#L1798)) using `Math.round(x)`/`Math.round(y)`.
+4. Add a `drawEnemy()` branch ([L1983](game.js#L1983)) using `Math.round(x)`/`Math.round(y)`.
 5. Add its currency value in **both** hit paths (player bullets and missiles).
 6. Bump the version, update the README rules, add a CHANGELOG entry.
 
 ### Add a shop item
 
 1. Price in `CONFIG`; an ownership getter and `apply()` in
-   [`SHOP_ITEMS`](game.js#L996).
+   [`SHOP_ITEMS`](game.js#L1064).
 2. That's it for buying — `buyShopItem()` and `drawShop()` iterate the array.
 3. **Layout caveat:** `drawShop()` positions rows at `112 + i * 13` and prints the
    "can't buy" warning at y 172. A fifth item lands at y 164 and crowds that warning, and
@@ -604,7 +652,7 @@ and the Patrol caps (`scrollCap`, `spawnScaleFloor`, `fireScaleFloor`,
 
 ### Add a HUD string
 
-Use only glyphs in the `FONT` table ([L1564](game.js#L1564)): `A–Z`, `0–9`, space, and
+Use only glyphs in the `FONT` table ([L1710](game.js#L1710)): `A–Z`, `0–9`, space, and
 `- + ! . : / > <`. Uppercase everything; unknown characters are silently skipped (you'll
 get a gap in the text). If you need a new character, add a 3×5 glyph there — each row is
 a 3-bit mask with the most significant bit on the left. `+` was added for the elite boss
@@ -627,7 +675,7 @@ labels; an em dash is still missing.
 - **Tuning numbers go in `CONFIG`/`MODIFIERS`/`COLORS`**, not inline in logic.
 - **One semantic version bump per change**, in three places: `CONFIG.version`
   ([L40](game.js#L40)), the "current version" line in the README, and a new CHANGELOG
-  entry at the top. They are currently in sync at 0.1.0; keep them that way.
+  entry at the top. They are currently in sync at 0.1.1; keep them that way.
 - **Keep the file map and section banners accurate** if you add a section.
 - **The README is player-facing.** If a change is visible to players (rules, controls,
   new enemies, modifiers), update it in the same pass.

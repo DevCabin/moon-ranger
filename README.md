@@ -8,7 +8,7 @@ Patrol.
 
 Built with plain HTML5 Canvas + JavaScript — **no dependencies, no build step**.
 
-Current version: **v0.1.0** — the full history of every change lives in
+Current version: **v0.1.1** — the full history of every change lives in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## Run locally
@@ -95,6 +95,15 @@ This is a fully static site.
   bosses carry elite traits: **FRENZIED** (fires faster) from the second visit,
   **SHIELDED** (slowly regains health until you hit it again) from the third.
   A recurring octopus still only takes heat seekers.
+- **Patrol bosses carry ordnance.** From sector 15 a boss throws missiles as
+  well as aimed shots: **1 aimed missile** at 15, **2** at 20, then heat
+  seekers — **1** at 25, **2** at 30, **3** from 35. They are slow, up to four
+  are in the air at once (five at 35+), **one bullet shoots one down**, and a
+  jump timed as a seeker closes makes it overshoot. Everything a boss has in the
+  air vanishes when it dies.
+- **Shields cost more the deeper you go:** +15% of base per sector past 10,
+  rounded to 10s — 120 / 350 at sector 11, 180 / 530 at sector 15. Missiles and
+  heat seekers stay at 300 / 500.
 - Each boss pays a 900-credit bounty.
 - Each level the terrain gets hillier and enemies spawn/shoot faster. Past
   sector 10 the hills stop growing (level 10 is the terrain ceiling); difficulty

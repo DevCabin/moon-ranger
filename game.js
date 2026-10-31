@@ -15,7 +15,7 @@
      F              .... toggle fullscreen
      Space / Click  .... start & restart
 
-   See CHANGELOG.md for the version history (current: v0.1.0).
+   See CHANGELOG.md for the version history (current: v0.1.1).
 
    FILE MAP (all sections are in this one file, top to bottom):
      1. CONFIG        — every tunable number lives here (plus MODIFIERS, 1b)
@@ -37,7 +37,7 @@
    ============================================================================ */
 const CONFIG = {
   // Game version — bump with every change (see CHANGELOG.md).
-  version: "0.1.0",
+  version: "0.1.1",
 
   // Internal render resolution. The game is simulated and drawn at this
   // low resolution, then scaled up with crisp pixels for the retro look.
@@ -168,6 +168,20 @@ const CONFIG = {
   bossHpGrowth: 0.25,          // +25% hp per repeat appearance
   bossFrenzyFireScale: 0.75,   // FRENZIED: aimed shots come this much faster
   bossShieldRegen: 6,          // SHIELDED: seconds per hit point regained
+
+  // Patrol boss ordnance. Campaign bosses never get it; from sector 15 the
+  // creatures lob aimed missiles, then heat seekers, in bigger volleys.
+  foeMissileSpeed: 150,        // aimed missile (px/sec)
+  foeHeatSpeed: 115,           // heat seeker — slower, so a jump can dodge it
+  // Radians/sec of homing steer. Measured: at 1.0 a jump timed mid-approach
+  // (~30-90 px out) makes it overshoot, while jumping early or at the last
+  // instant still gets you hit. At 1.8 every jump dodged it, at any distance.
+  foeHeatTurnRate: 1.0,
+  foeMissileLife: 6,           // seconds before an aimed missile fizzles
+  foeHeatLife: 7,              // ... and a heat seeker
+  foeMissileMax: 4,            // live boss missiles allowed at once (5 at 35+)
+  foeSalvoGap: 0.15,           // seconds between shots inside one volley
+  shieldPriceScale: 0.15,      // shields cost +15% of base per sector past 10
 };
 
 /* ============================================================================
@@ -308,6 +322,7 @@ const AudioSys = {
   missile()    { this.beep(500, 900, 0.12, 0.07, "sawtooth"); },
   shopOpen()   { this.beep(520, 780, 0.1, 0.09); },
   bossAlarm()  { this.beep(90, 45, 0.8, 0.16, "sawtooth"); this.noise(0.5, 0.18); },
+  foeMissile() { this.beep(90, 260, 0.45, 0.1, "sawtooth"); },
   bossHit()    { this.beep(170, 90, 0.07, 0.1, "square"); },
   victory()    { [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => this.beep(f, f, 0.18, 0.12), i * 140)); },
 };
@@ -456,6 +471,7 @@ let sparks  = [];     // explosion particles
 let bombs   = [];     // {x,y,vx,vy,dead} — big bombs dropped by bombers
 let meteors = [];     // {x,y,vx,vy,state,spin,dead} — indestructible rollers
 let missiles = [];    // {x,y,vx,vy,heat,dead} — bought auto-fire ordnance
+let foeMissiles = []; // {x,y,vx,vy,heat,kind,life,dead} — boss ordnance
 
 // Auto-fired missile. heat=true → red, homes toward the nearest enemy.
 function spawnMissile(x, y, heat) {
@@ -579,6 +595,42 @@ function bossForSector(sector) {
   };
 }
 
+// Boss ordnance ladder. The stage is derived from the sector, not the creature,
+// so the same spider opens with one aimed missile at 15 and three heat seekers
+// at 35. Campaign bosses never get these (sector < 15).
+function bossOrdnance(sector) {
+  if (sector < CONFIG.patrolBossStart) return null;
+  const maxLive = CONFIG.foeMissileMax;
+  if (sector < 20) return { heat: false, volley: 1, gap: [3.5, 4.5], maxLive };
+  if (sector < 25) return { heat: false, volley: 2, gap: [3.5, 4.5], maxLive };
+  if (sector < 30) return { heat: true,  volley: 1, gap: [5.0, 6.0], maxLive };
+  if (sector < 35) return { heat: true,  volley: 2, gap: [5.0, 6.0], maxLive };
+  return { heat: true, volley: 3, gap: [4.5, 5.5], maxLive: maxLive + 1 };
+}
+
+// A boss fires one piece of ordnance at the jeep's current position. Aimed
+// missiles fly straight; heat seekers steer slowly and expire on their own.
+function spawnFoeMissile(boss, heat) {
+  const sx = boss.x + boss.w / 2, sy = boss.y + boss.h / 2;
+  const ang = Math.atan2(Jeep.centerY - sy, Jeep.centerX - sx);
+  const sp = heat ? CONFIG.foeHeatSpeed : CONFIG.foeMissileSpeed;
+  foeMissiles.push({
+    x: sx, y: sy,
+    vx: Math.cos(ang) * sp,
+    vy: Math.sin(ang) * sp,
+    heat: !!heat,
+    kind: boss.bossKind,
+    life: heat ? CONFIG.foeHeatLife : CONFIG.foeMissileLife,
+    dead: false,
+  });
+  AudioSys.foeMissile();
+}
+
+// No post-victory deaths: the moment a boss dies, its ordnance is gone.
+function clearFoeMissiles() {
+  for (const m of foeMissiles) m.dead = true;
+}
+
 // Bosses: one creature guards the end of levels 3, 7 and 10, and again at
 // intervals through the Patrol. It slides in from the right and the sector
 // cannot advance until it dies. Called from update() at the finish line.
@@ -612,6 +664,12 @@ function spawnBoss(sector) {
   e.shielded = !!cfg.shielded;
   e.elite = cfg.elite;
   e.regenTimer = CONFIG.bossShieldRegen;
+  // Patrol ordnance (null for the campaign bosses). Salvo state lives on the
+  // enemy so a pooled boss can't inherit a half-fired volley.
+  e.ord = bossOrdnance(sector);
+  e.ordTimer = e.ord ? rand(e.ord.gap[0], e.ord.gap[1]) : 0;
+  e.ordSalvo = 0;
+  e.ordSalvoTimer = 0;
   enemies.push(e);
   Game.bossActive = true;
   Game.bossDefeated = false;
@@ -648,9 +706,11 @@ function damageBoss(e, fromHeat, hx, hy) {
   Game.shake = 0.8;
   Game.score += CONFIG.scorePerBossKill;
   Game.bossActive = false;
+  clearFoeMissiles();
   // The campaign octopus is the milestone, not the end: MOON SAVED, then the
-  // Patrol continues. Every other boss just opens the next sector.
-  if (e.heatOnly && !Game.cleared) {
+  // Patrol continues. Every other boss just opens the next sector — including
+  // a recurring octopus, which must never re-trigger the freeze.
+  if (e.heatOnly && !Game.cleared && Game.sector <= CONFIG.maxLevel) {
     Game.milestone();
   } else {
     Game.bossDefeated = true;
@@ -869,6 +929,16 @@ const Game = {
     return quota;
   },
 
+  // Shields get pricier as the Patrol deepens (rounded to 10s); ordnance
+  // prices stay fixed so late-game firepower is not gated by inflation.
+  shieldPrice(base) {
+    if (this.sector <= CONFIG.maxLevel) return base;
+    const scaled = base * (1 + CONFIG.shieldPriceScale * (this.sector - CONFIG.maxLevel));
+    // The epsilon keeps floating point honest: 100 * 1.15 is 114.999…, which
+    // would round down to 110 when the intent is a normal half-up 120.
+    return Math.round(scaled / 10 + 1e-9) * 10;
+  },
+
   // Remember the deepest sector ever reached (shown on the title screen).
   saveDepth() {
     if (this.sector <= this.depth) return;
@@ -932,7 +1002,7 @@ const Game = {
     for (const e of enemies) enemyPool.put(e);
     for (const s of sparks) sparkPool.put(s);
     bullets = []; enemies = []; sparks = [];
-    bombs = []; meteors = []; missiles = [];
+    bombs = []; meteors = []; missiles = []; foeMissiles = [];
   },
 
   gameOver() {
@@ -994,8 +1064,8 @@ const Game = {
 
 // The buy menu (press B during play). Prices come from CONFIG.
 const SHOP_ITEMS = [
-  { name: "SMALL SHIELD  +1 HIT",  price: () => CONFIG.priceSmallShield, owned: () => false,            apply() { Game.shield += 1; } },
-  { name: "LARGE SHIELD  +3 HITS", price: () => CONFIG.priceLargeShield, owned: () => false,            apply() { Game.shield += 3; } },
+  { name: "SMALL SHIELD  +1 HIT",  price: () => Game.shieldPrice(CONFIG.priceSmallShield), owned: () => false, apply() { Game.shield += 1; } },
+  { name: "LARGE SHIELD  +3 HITS", price: () => Game.shieldPrice(CONFIG.priceLargeShield), owned: () => false, apply() { Game.shield += 3; } },
   { name: "MISSILES  45 AUTO",     price: () => CONFIG.priceMissiles,    owned: () => Jeep.missiles >= CONFIG.maxMissileStacks,    apply() { Jeep.missiles++; } },
   { name: "HEAT SEEKERS  AUTO",    price: () => CONFIG.priceHeatSeekers, owned: () => Jeep.heatSeekers >= CONFIG.maxHeatStacks, apply() { Jeep.heatSeekers++; } },
 ];
@@ -1268,6 +1338,25 @@ function update(dt) {
             AudioSys.beep(260, 560, 0.14, 0.06);
           }
         }
+        // Patrol ordnance: a volley every few seconds, capped by live count so
+        // the screen can't fill with homing missiles.
+        if (e.ord) {
+          if (e.ordSalvo > 0) {
+            e.ordSalvoTimer -= dt;
+            if (e.ordSalvoTimer <= 0 && foeMissiles.length < e.ord.maxLive) {
+              spawnFoeMissile(e, e.ord.heat);
+              e.ordSalvo--;
+              e.ordSalvoTimer = CONFIG.foeSalvoGap;
+            }
+          } else {
+            e.ordTimer -= dt;
+            if (e.ordTimer <= 0) {
+              e.ordTimer = rand(e.ord.gap[0], e.ord.gap[1]);
+              e.ordSalvo = e.ord.volley;
+              e.ordSalvoTimer = 0;
+            }
+          }
+        }
       }
     } else {
       // Air enemies hold altitude with a gentle bob.
@@ -1368,6 +1457,17 @@ function update(dt) {
           }
         }
       }
+      // Boss ordnance is shootable: one bullet takes one missile down.
+      if (!b.dead) {
+        for (const m of foeMissiles) {
+          if (!m.dead && pointInRect(b.x, b.y, m.x - 4, m.y - 4, 8, 8)) {
+            b.dead = true;
+            m.dead = true;
+            explode(m.x, m.y, COLORS.flame, 10);
+            break;
+          }
+        }
+      }
     } else {
       // Enemy bullet vs jeep (hitbox padded to match the bigger dot).
       if (pointInRect(b.x, b.y, Jeep.x, Jeep.y - 5, CONFIG.jeepW, CONFIG.jeepH + 5)) {
@@ -1434,6 +1534,42 @@ function update(dt) {
         damageJeep(); // a shield saves you, but the meteor keeps on rolling
       }
       if (m.x + m.w < -20) m.dead = true;
+    }
+  }
+
+  /* -- Boss ordnance: slow missiles the player can dodge or shoot down -- */
+  for (const m of foeMissiles) {
+    m.life -= dt;
+    if (m.life <= 0) { m.dead = true; continue; }
+
+    if (m.heat) {
+      // Homing is deliberately weak: a jump timed as it closes makes it
+      // overshoot, which is what keeps the endgame fightable without shields.
+      const want = Math.atan2(Jeep.centerY - m.y, Jeep.centerX - m.x);
+      const cur = Math.atan2(m.vy, m.vx);
+      let diff = ((want - cur + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      const maxTurn = CONFIG.foeHeatTurnRate * dt;
+      const next = cur + Math.max(-maxTurn, Math.min(maxTurn, diff));
+      m.vx = Math.cos(next) * CONFIG.foeHeatSpeed;
+      m.vy = Math.sin(next) * CONFIG.foeHeatSpeed;
+    }
+
+    m.x += m.vx * dt;
+    m.y += m.vy * dt;
+
+    if (m.x < -20 || m.x > CONFIG.viewW + 20 || m.y < -20 || m.y > CONFIG.viewH + 20) {
+      m.dead = true;
+      continue;
+    }
+    if (m.y >= Terrain.groundY(Game.worldOffset + m.x)) {
+      m.dead = true;
+      explode(m.x, m.y - 2, COLORS.flame, 8);
+      continue;
+    }
+    // Point hit with a small pad: slow and visible, but genuinely dangerous.
+    if (pointInRect(m.x, m.y, Jeep.x - 4, Jeep.y - 4, CONFIG.jeepW + 8, CONFIG.jeepH + 8)) {
+      m.dead = true;
+      damageJeep();
     }
   }
 
@@ -1508,6 +1644,17 @@ function update(dt) {
         }
       }
     }
+    // Player missiles can also knock boss ordnance out of the sky.
+    if (!m.dead) {
+      for (const fm of foeMissiles) {
+        if (!fm.dead && pointInRect(m.x, m.y, fm.x - 4, fm.y - 4, 8, 8)) {
+          m.dead = true;
+          fm.dead = true;
+          explode(fm.x, fm.y, COLORS.flame, 10);
+          break;
+        }
+      }
+    }
   }
 
   updateSparks(dt);
@@ -1526,6 +1673,7 @@ function update(dt) {
   if (bombs.some(b => b.dead)) bombs = bombs.filter(b => !b.dead);
   if (meteors.some(m => m.dead)) meteors = meteors.filter(m => !m.dead);
   if (missiles.some(m => m.dead)) missiles = missiles.filter(m => !m.dead);
+  if (foeMissiles.some(m => m.dead)) foeMissiles = foeMissiles.filter(m => !m.dead);
 
   clicked = false;
 }
@@ -1667,6 +1815,7 @@ function render() {
   for (const e of enemies) drawEnemy(e);
   for (const b of bombs) drawBomb(b);
   for (const m of meteors) drawMeteor(m);
+  for (const m of foeMissiles) drawFoeMissile(m);
   for (const m of missiles) drawMissile(m);
   drawJeep();
 
@@ -1737,6 +1886,44 @@ function drawMissile(m) {
     ctx.fillStyle = COLORS.flame;
     ctx.fillRect(x - 5, y, 3, 1);
   }
+}
+
+// Boss ordnance: a chunky missile in the firing creature's colour. Heat
+// seekers pulse so they read differently from the straight-flying ones.
+function drawFoeMissile(m) {
+  const x = Math.round(m.x), y = Math.round(m.y);
+  const color = m.kind === "spider" ? COLORS.bossSpider
+    : m.kind === "crab" ? COLORS.bossCrab
+    : COLORS.bossOcto;
+  const dark = m.kind === "spider" ? COLORS.bossSpiderDk
+    : m.kind === "crab" ? COLORS.bossCrabDk
+    : COLORS.bossOctoDk;
+
+  if (m.heat) {
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 110);
+    const r = Math.round(6 + pulse * 2);
+    ctx.globalAlpha = 0.25 + (1 - pulse) * 0.4;
+    ctx.fillStyle = color;
+    ctx.fillRect(x - r, y, 2, 2);
+    ctx.fillRect(x + r, y, 2, 2);
+    ctx.fillRect(x, y - r, 2, 2);
+    ctx.fillRect(x, y + r, 2, 2);
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(Math.atan2(m.vy, m.vx));
+  const f = Math.floor(performance.now() / 60) % 2;
+  ctx.fillStyle = COLORS.flame;
+  ctx.fillRect(-9 - f, -1, 4, 2);        // exhaust
+  ctx.fillStyle = dark;
+  ctx.fillRect(-5, -3, 9, 6);            // outline
+  ctx.fillStyle = color;
+  ctx.fillRect(-5, -2, 9, 4);            // body
+  ctx.fillStyle = COLORS.hud;
+  ctx.fillRect(2, -1, 2, 2);             // nose glint
+  ctx.restore();
 }
 
 function drawJeep() {
@@ -2373,10 +2560,12 @@ Jeep.y = Terrain.groundY(Jeep.x) - CONFIG.jeepH;
 window.GAME = {
   Game, Jeep, Terrain, CONFIG, MODIFIERS,
   spawnEnemy, spawnBullet, spawnMeteor, spawnBoss, bossForSector, damageBoss,
+  bossOrdnance, spawnFoeMissile,
   get enemies() { return enemies; },
   get bullets() { return bullets; },
   get meteors() { return meteors; },
   get missiles() { return missiles; },
+  get foeMissiles() { return foeMissiles; },
 };
 
 const STEP = 1 / 60;

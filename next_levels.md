@@ -1,8 +1,7 @@
 # Next Steps — Endless Patrol (post-level-10)
 
-**Status:** steps 1–5 and the docs/version pass are implemented and released as
-  `0.1.0`. Boss ordnance (6) and shield price scaling (7) are still to do; the
-  octopus heat-economy fix landed early, in step 5.
+**Status:** complete as of `0.1.1`. All eight steps of section 12 are implemented,
+  tested in the browser, documented and released. Kept as design rationale.
 **Target version:** `0.1.0` (new mode, not a patch). `CONFIG.version` is still
   `0.0.15`; it gets bumped in step 8.
 **Build before this work:** `0.0.15` — 10 levels, bosses at 3/7/10, Octopus
@@ -235,7 +234,7 @@ Specs (starting points):
 | Property | Aimed missile | Boss heat seeker |
 | --- | --- | --- |
 | Speed | 150 px/s | 115 px/s |
-| Homing | none | `1.8 rad/s` turn toward `Jeep.centerX/Y` |
+| Homing | none | `1.0 rad/s` turn toward `Jeep.centerX/Y` (measured; see step 6) |
 | Lifetime | 6 s | 7 s |
 | Max live at once | 4 (all boss missiles together) | 4 (5 after sector 35) |
 | Shootable? | **yes**, 1 player bullet destroys it | **yes**, 1 bullet |
@@ -382,10 +381,15 @@ Each step should be playable before moving on.
    Also pulled forward from step 7: the octopus emergency top-up is gated on
    `!Game.cleared`, because recurring octopuses would otherwise hand out 500
    credits every time.
-6. **Boss ordnance** — `foeMissiles`, stages from section 8.2, draw + collision +
-   shoot-down + audio.
-7. **Economy** — shield price scaling. (The octopus heat-economy fix is already
-   in: the emergency top-up is gated on `!Game.cleared`.)
+6. ✅ **Boss ordnance** — `bossOrdnance(sector)` stage table, `spawnFoeMissile()`,
+   the `foeMissiles` array, `drawFoeMissile()` (rotated dart, heat seeker pulse),
+   bullet/missile shoot-down, terrain + jeep collision, `clearFoeMissiles()` on
+   boss death, and `AudioSys.foeMissile()`. **Turn rate shipped at 1.0, not 1.8:**
+   measured, 1.8 let a jump dodge from any distance; at 1.0 a mid-approach jump
+   evades while early (~100 px) or last-instant (~20 px) jumps still get hit.
+7. ✅ **Economy** — `Game.shieldPrice()` scales shields by +15% of base per
+   sector past 10, rounded to 10s (`CONFIG.shieldPriceScale`); ordnance prices
+   stay fixed. The octopus heat-economy fix landed early, in step 5.
 8. ✅ **Docs & release** — README rules, CHANGELOG entry, `developers.md`
    section 9 (sectors / modifiers / Patrol bosses), all 28 `game.js#L…` links
    re-verified against the file, version `0.1.0` in `CONFIG`, the header, the
