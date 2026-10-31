@@ -7,7 +7,7 @@ fire, and shoot down alien moon rovers and flying saucers. Survive from level 1
 
 Built with plain HTML5 Canvas + JavaScript — **no dependencies, no build step**.
 
-Current version: **v0.0.9** — the full history of every change lives in
+Current version: **v0.0.15** — the full history of every change lives in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## Run locally
@@ -49,10 +49,10 @@ This is a fully static site.
   Spending is permanent — your currency drops by the price paid.
   - **Small Shield (100)** — absorbs 1 hit
   - **Large Shield (300)** — absorbs 3 hits (stacks with small)
-  - **Missiles (300)** — auto-fire a missile at 45° up-right every few
-    seconds, until the run ends
+  - **Missiles (300)** — auto-fire at 45° up-right until the run ends. Buy up
+    to **3**: every cycle launches one missile per launcher, so 1, 2, 3…
   - **Heat Seekers (500)** — red homing missiles that chase the nearest
-    enemy, until the run ends
+    enemy, until the run ends. They stack **3** deep the same way.
 - Shields show as a cyan ring and HUD pips; after a shielded hit you get a
   second of invulnerability (the jeep blinks).
 - Enemy dots are aimed at you — one per enemy at a time. Jump to dodge.
@@ -62,6 +62,20 @@ This is a fully static site.
 - **Meteorites** (level 3+) fall from the top-right, slam down right of
   center, then roll toward you. They **cannot be shot** — you must jump
   over them.
+- **Bosses guard the end of levels 3, 7 and 10.** The level holds at its
+  finish line until the creature is destroyed:
+  - **Spider** (level 3) and **Crab** (level 7) take six times a red
+    ship's hits — 30 to 60 of them.
+  - **Octopus** (level 10) is the big one. Gunfire and ordinary missiles
+    bounce off it: only **Heat Seekers** hurt it, and it takes **20 hits**.
+    If you reach it without heat seekers and can't afford the 500, the moon
+    base fronts you the price — press **B** to buy.
+  - **Meteorites keep falling during boss fights**, on their own faster,
+    intermittent cadence. They slam down between you and the creature and
+    must be jumped.
+  - Boss shots are **tiny copies of the creature**, pulsing as they fly.
+- **Destroy the Octopus to win the run.** There is no level 11.
+- Each boss pays a 900-credit bounty.
 - Each level the terrain gets hillier and enemies spawn/shoot faster.
 - High score is saved in your browser (`localStorage`).
 

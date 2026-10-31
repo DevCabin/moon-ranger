@@ -1,5 +1,5 @@
 /* ============================================================================
-   MOON PATROL — an Atari-style 2D jeep scroller
+   MOON RANGER — an Atari-style 2D jeep scroller
    ----------------------------------------------------------------------------
    Plain Canvas 2D, no dependencies, no build step.
    Deploy the whole folder to Vercel (or any static host) as-is.
@@ -15,7 +15,7 @@
      F              .... toggle fullscreen
      Space / Click  .... start & restart
 
-   See CHANGELOG.md for the version history (current: v0.0.9).
+   See CHANGELOG.md for the version history (current: v0.0.15).
 
    FILE MAP (all sections are in this one file, top to bottom):
      1. CONFIG        — every tunable number lives here
@@ -37,7 +37,7 @@
    ============================================================================ */
 const CONFIG = {
   // Game version — bump with every change (see CHANGELOG.md).
-  version: "0.0.9",
+  version: "0.0.15",
 
   // Internal render resolution. The game is simulated and drawn at this
   // low resolution, then scaled up with crisp pixels for the retro look.
@@ -100,9 +100,12 @@ const CONFIG = {
   priceLargeShield: 300,       // +3 shield hits
   priceMissiles: 300,          // auto-fire 45° up-right until you die
   priceHeatSeekers: 500,       // homing red missiles until you die
-  missileInterval: 2.5,        // seconds between auto missiles
+  maxMissileStacks: 3,         // buy up to this many 45° launchers
+  maxHeatStacks: 3,            // ... and up to this many heat-seeker banks
+  salvoGap: 0.12,              // seconds between shots inside a stacked volley
+  missileInterval: 2.5,        // seconds between auto missile volleys
   missileSpeed: 280,
-  heatInterval: 1.8,           // seconds between heat seekers
+  heatInterval: 1.8,           // seconds between heat-seeker volleys
   heatSpeed: 240,
   heatTurnRate: 4.6,           // radians/sec of homing steer
   shieldInvulnTime: 1.0,       // grace period after a shield absorbs a hit
@@ -123,8 +126,30 @@ const CONFIG = {
   // of center, then roll left toward the jeep. INDESTRUCTIBLE — jump them!
   meteorMinGap: 5,             // seconds between meteors (min)
   meteorMaxGap: 9,             // ... (max)
+  bossMeteorMinGap: 3.5,       // meteors keep falling during boss fights...
+  bossMeteorMaxGap: 6.5,       // ...on their own, faster cadence
   meteorFallTime: 1.1,         // seconds from spawn to ground impact
   meteorRollSpeed: 36,         // leftward roll speed on top of the scroll
+
+  // Bosses — a creature guards the end of levels 3, 7 and 10. The level
+  // cannot advance until it dies. The spider and crab take 6x a red ship's
+  // hits (red ships are 5-10, so bosses are 30-60). The level-10 octopus
+  // shrugs off bullets and normal missiles: only HEAT SEEKERS hurt it, and
+  // it takes exactly `octopusHeatHits` of them.
+  bosses: {
+    3:  { kind: "spider",  name: "SPIDER",  w: 88,  h: 52, hover: 0.30 },
+    7:  { kind: "crab",    name: "CRAB",    w: 80,  h: 48, hover: 0.33 },
+    10: { kind: "octopus", name: "OCTOPUS", w: 112, h: 70, hover: 0.30, heatOnly: true },
+  },
+  bossHpBase: 5,               // red ship base hits (5-10)
+  bossHpFactor: 6,             // bosses take this many times a red ship's hits
+  octopusHeatHits: 20,         // heat-seeker hits the octopus needs
+  bossEntryTime: 2.2,          // seconds spent sliding into the arena
+  bossScrollFactor: 0.35,      // world scroll speed during a boss fight
+  bossFireMin: 0.9,            // seconds between boss shots (min)
+  bossFireMax: 1.6,            // ... (max)
+  bossBulletSpeed: 118,
+  scorePerBossKill: 900,
 };
 
 /* ============================================================================
@@ -162,6 +187,16 @@ const COLORS = {
   meteor:     "#8a6a4a",   // tumbling space rock
   meteorDark: "#4a3626",
   flame:      "#ff9a2a",
+  // Boss creatures (end of levels 3, 7, 10)
+  bossSpider:   "#a45cff",
+  bossSpiderDk: "#4a1a7a",
+  bossCrab:     "#ff5a1f",
+  bossCrabDk:   "#7a2208",
+  bossOcto:     "#ff3fa4",
+  bossOctoDk:   "#7a1450",
+  bossEye:      "#ffffff",
+  bossPupil:    "#101018",
+  bossBeak:     "#ffd23a",
   bulletYou:  "#66ffff",
   bulletFoe:  "#ff5a3c",
   hud:        "#e8e8e8",
@@ -181,14 +216,14 @@ const AudioSys = {
     if (!this.ctx) {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (AC) this.ctx = new AC();
-      this.muted = localStorage.getItem("moonpatrol_muted") === "1";
+      this.muted = localStorage.getItem("moonranger_muted") === "1";
     }
     if (this.ctx && this.ctx.state === "suspended") this.ctx.resume();
   },
 
   toggleMute() {
     this.muted = !this.muted;
-    localStorage.setItem("moonpatrol_muted", this.muted ? "1" : "0");
+    localStorage.setItem("moonranger_muted", this.muted ? "1" : "0");
   },
 
   // One square-wave beep: freq slides from f0 to f1 over `dur` seconds.
@@ -239,6 +274,9 @@ const AudioSys = {
   shieldHit()  { this.beep(500, 150, 0.18, 0.12); this.noise(0.15, 0.12); },
   missile()    { this.beep(500, 900, 0.12, 0.07, "sawtooth"); },
   shopOpen()   { this.beep(520, 780, 0.1, 0.09); },
+  bossAlarm()  { this.beep(90, 45, 0.8, 0.16, "sawtooth"); this.noise(0.5, 0.18); },
+  bossHit()    { this.beep(170, 90, 0.07, 0.1, "square"); },
+  victory()    { [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => this.beep(f, f, 0.18, 0.12), i * 140)); },
 };
 
 /* ============================================================================
@@ -325,10 +363,14 @@ const Jeep = {
   gunAngle: -30,           // degrees; starts angled slightly upward
   fireCooldown: 0,
   invuln: 0,               // grace seconds after a shield absorbs a hit
-  hasMissiles: false,      // bought: auto-fire 45° up-right
-  hasHeat: false,          // bought: homing heat seekers
+  missiles: 0,             // bought stacks (0-3): a volley of 1, 2 or 3 per cycle
+  heatSeekers: 0,          // bought stacks (0-3): same, homing
   missileTimer: 0,
   heatTimer: 0,
+  salvoLeft: 0,            // missiles still to leave the tube this volley
+  salvoTimer: 0,
+  heatSalvoLeft: 0,
+  heatSalvoTimer: 0,
 
   reset() {
     this.vy = 0;
@@ -336,10 +378,14 @@ const Jeep = {
     this.gunAngle = -30;
     this.fireCooldown = 0;
     this.invuln = 0;
-    this.hasMissiles = false;
-    this.hasHeat = false;
+    this.missiles = 0;
+    this.heatSeekers = 0;
     this.missileTimer = CONFIG.missileInterval;
     this.heatTimer = CONFIG.heatInterval;
+    this.salvoLeft = 0;
+    this.salvoTimer = 0;
+    this.heatSalvoLeft = 0;
+    this.heatSalvoTimer = 0;
   },
 
   get centerX() { return this.x + CONFIG.jeepW / 2; },
@@ -416,6 +462,9 @@ function spawnBullet(x, y, vx, vy, friendly, owner) {
   const b = bulletPool.get();
   b.x = x; b.y = y; b.vx = vx; b.vy = vy;
   b.friendly = friendly; b.owner = owner; b.dead = false;
+  // Boss shots draw as a mini copy of the creature. Copy the kind now: the
+  // boss can die (and be pooled) while the shot is still in flight.
+  b.bossKind = owner && owner.type === "boss" ? owner.bossKind : null;
   bullets.push(b);
   return b;
 }
@@ -459,9 +508,83 @@ function bombersPerLevel(level) {
   return level === 1 ? 1 : level === 2 ? 2 : 3;
 }
 
+// Bosses: one creature guards the end of levels 3, 7 and 10. It slides in from
+// the right and the level cannot advance until it dies. Called from update()
+// on the frame the finish line is reached.
+function spawnBoss(level) {
+  const cfg = CONFIG.bosses[level];
+  const e = enemyPool.get();
+  e.type = "boss";
+  e.bossKind = cfg.kind;
+  e.name = cfg.name;
+  e.heatOnly = !!cfg.heatOnly;
+  e.w = cfg.w;
+  e.h = cfg.h;
+  e.baseX = Math.round(CONFIG.viewW * 0.62 - cfg.w / 2);
+  e.baseY = Math.round(CONFIG.viewH * cfg.hover - cfg.h / 2);
+  e.x = CONFIG.viewW + 8;
+  e.y = e.baseY;
+  e.entry = CONFIG.bossEntryTime;   // > 0 while still sliding in (can't shoot)
+  e.bob = 0;
+  e.fireTimer = 1.2;
+  e.myBullet = null;
+  e.hitFlash = 0;
+  e.colorIdx = 0;
+  e.dead = false;
+  // 6x a red ship's 5-10 hits, except the octopus: 20 heat-seeker hits only.
+  e.hp = e.maxHp = e.heatOnly
+    ? CONFIG.octopusHeatHits
+    : CONFIG.bossHpFactor * (CONFIG.bossHpBase + Math.floor(rand(0, 6)));
+  enemies.push(e);
+  Game.bossActive = true;
+  Game.bossDefeated = false;
+  Game.banner = cfg.name + " ATTACKS!";
+  Game.bannerTimer = 2;
+  AudioSys.bossAlarm();
+  // The octopus can only be hurt by heat seekers. Front the price if the
+  // player has none and can't afford them, so the final fight can't deadlock.
+  if (e.heatOnly && Jeep.heatSeekers === 0 && Game.score < CONFIG.priceHeatSeekers) {
+    Game.score = CONFIG.priceHeatSeekers;
+    Game.bossHintTimer = 4;
+  }
+  return e;
+}
+
+// One hit lands on a boss. Bullets and plain missiles streak off the octopus;
+// only heat seekers damage it. Any hit damages the spider and crab.
+function damageBoss(e, fromHeat, hx, hy) {
+  if (e.heatOnly && !fromHeat) {
+    Game.bossHintTimer = 2.4;
+    tinySpark(hx === undefined ? e.x + e.w / 2 : hx, hy === undefined ? e.y + e.h / 2 : hy);
+    AudioSys.denied();
+    return;
+  }
+  e.hp--;
+  e.hitFlash = 0.1;
+  AudioSys.bossHit();
+  if (e.hp > 0) return;
+
+  e.dead = true;
+  explode(e.x + e.w / 2, e.y + e.h / 2, enemyMainColor(e), 60);
+  Game.shake = 0.8;
+  Game.score += CONFIG.scorePerBossKill;
+  Game.bossActive = false;
+  if (Game.level >= CONFIG.maxLevel) {
+    Game.victory();
+  } else {
+    Game.bossDefeated = true;
+    Game.nextLevel();
+  }
+}
+
 // Main body color of an enemy (ground rovers use their cycled colorway).
 function enemyMainColor(e) {
   if (e.type === "ground") return COLORS.roverVariants[e.colorIdx % COLORS.roverVariants.length][0];
+  if (e.type === "boss") {
+    return e.bossKind === "spider" ? COLORS.bossSpider
+         : e.bossKind === "crab" ? COLORS.bossCrab
+         : COLORS.bossOcto;
+  }
   return e.type === "bomber" ? COLORS.bomber : COLORS.ufo;
 }
 
@@ -472,8 +595,8 @@ function spawnBomb(x, y) {
 
 // Meteor: spawns off the top-right corner, slams into the ground right of
 // center, then rolls left toward the jeep. Cannot be shot — only jumped.
-function spawnMeteor() {
-  const impactX = rand(CONFIG.viewW * 0.55, CONFIG.viewW * 0.85);
+function spawnMeteor(minFrac = 0.55, maxFrac = 0.85) {
+  const impactX = rand(CONFIG.viewW * minFrac, CONFIG.viewW * maxFrac);
   const startX = CONFIG.viewW + 16, startY = -14;
   const t = CONFIG.meteorFallTime;
   meteors.push({
@@ -533,9 +656,9 @@ function hash1(n) {
    7. GAME STATE
    ============================================================================ */
 const Game = {
-  state: "title",        // "title" | "play" | "pause" | "shop" | "gameover"
+  state: "title",        // "title" | "play" | "pause" | "shop" | "gameover" | "victory"
   score: 0,              // CURRENCY — spendable in the buy menu
-  hiScore: Number(localStorage.getItem("moonpatrol_hi") || 0),
+  hiScore: Number(localStorage.getItem("moonranger_hi") || 0),
   shield: 0,             // shield charges (small +1 / large +3)
   shopFlash: 0,          // "not enough currency" warning timer
   roverCycle: 0,         // next ground-rover colorway index
@@ -548,6 +671,11 @@ const Game = {
   bomberSchedule: [],  // absolute arrival times (s into the level), one per bomber
   bomberIdx: 0,        // how many scheduled bombers have arrived
   meteorTimer: 0,
+
+  // Boss fight bookkeeping (see spawnBoss / CONFIG.bosses).
+  bossActive: false,     // a boss is on screen and the level is blocked
+  bossDefeated: false,   // this level's boss has been destroyed
+  bossHintTimer: 0,      // "heat seekers only" flash after a wasted hit
 
   // Seconds one level takes at the current scroll speed.
   computeLevelDuration() {
@@ -591,6 +719,9 @@ const Game = {
     this.shield = 0;
     this.shopFlash = 0;
     this.roverCycle = 0;
+    this.bossActive = false;
+    this.bossDefeated = false;
+    this.bossHintTimer = 0;
     clearPresses();
 
     // Return everything to the pools.
@@ -604,14 +735,26 @@ const Game = {
   gameOver() {
     this.state = "gameover";
     this.hiScore = Math.max(this.hiScore, Math.floor(this.score));
-    localStorage.setItem("moonpatrol_hi", String(this.hiScore));
+    localStorage.setItem("moonranger_hi", String(this.hiScore));
     clearPresses();
     AudioSys.gameOver();
+  },
+
+  // The octopus is dead and there is no level 11: end the run in triumph.
+  victory() {
+    this.state = "victory";
+    this.hiScore = Math.max(this.hiScore, Math.floor(this.score));
+    localStorage.setItem("moonranger_hi", String(this.hiScore));
+    clearPresses();
+    AudioSys.victory();
   },
 
   nextLevel() {
     this.level = Math.min(this.level + 1, CONFIG.maxLevel);
     Terrain.setLevel(this.level);
+    this.bossActive = false;
+    this.bossDefeated = false;
+    this.bossHintTimer = 0;
     // Any bomber still on screen belongs to the PREVIOUS level's quota:
     // send it packing so this level serves up exactly its own count.
     for (const e of enemies) {
@@ -632,8 +775,8 @@ const Game = {
 const SHOP_ITEMS = [
   { name: "SMALL SHIELD  +1 HIT",  price: () => CONFIG.priceSmallShield, owned: () => false,            apply() { Game.shield += 1; } },
   { name: "LARGE SHIELD  +3 HITS", price: () => CONFIG.priceLargeShield, owned: () => false,            apply() { Game.shield += 3; } },
-  { name: "MISSILES  45 AUTO",     price: () => CONFIG.priceMissiles,    owned: () => Jeep.hasMissiles, apply() { Jeep.hasMissiles = true; } },
-  { name: "HEAT SEEKERS  AUTO",    price: () => CONFIG.priceHeatSeekers, owned: () => Jeep.hasHeat,     apply() { Jeep.hasHeat = true; } },
+  { name: "MISSILES  45 AUTO",     price: () => CONFIG.priceMissiles,    owned: () => Jeep.missiles >= CONFIG.maxMissileStacks,    apply() { Jeep.missiles++; } },
+  { name: "HEAT SEEKERS  AUTO",    price: () => CONFIG.priceHeatSeekers, owned: () => Jeep.heatSeekers >= CONFIG.maxHeatStacks, apply() { Jeep.heatSeekers++; } },
 ];
 
 function buyShopItem(i) {
@@ -661,7 +804,7 @@ function update(dt) {
     return;
   }
 
-  if (Game.state === "gameover") {
+  if (Game.state === "gameover" || Game.state === "victory") {
     updateSparks(dt);
     if (Game.shake > 0) Game.shake -= dt;
     if (Game.flash > 0) Game.flash -= dt;
@@ -702,21 +845,30 @@ function update(dt) {
   /* ---- PLAY ---- */
 
   const levelT = Game.level - 1;
-  const scroll = CONFIG.scrollSpeed + CONFIG.scrollSpeedPerLevel * levelT;
+  // The world slows right down while a boss is on screen — the fight is an arena.
+  const scroll = (CONFIG.scrollSpeed + CONFIG.scrollSpeedPerLevel * levelT)
+    * (Game.bossActive ? CONFIG.bossScrollFactor : 1);
 
   // World scrolls; jeep x stays put.
   Game.worldOffset += scroll * dt;
   Game.distance += scroll * dt;
   Game.score += scroll * dt * CONFIG.scorePerPixel;
 
-  // Level progression by distance travelled.
-  if (Game.distance >= Game.level * CONFIG.levelLength && Game.level < CONFIG.maxLevel) {
+  // Level progression by distance travelled. Levels 3, 7 and 10 hold their
+  // finish line open until their boss dies; level 10 has no next level at all,
+  // so beating the octopus wins the run (see damageBoss).
+  const levelEnd = Game.distance >= Game.level * CONFIG.levelLength;
+  if (levelEnd && CONFIG.bosses[Game.level] && !Game.bossDefeated) {
+    Game.distance = Game.level * CONFIG.levelLength;   // hold the finish line
+    if (!Game.bossActive) spawnBoss(Game.level);
+  } else if (levelEnd && Game.level < CONFIG.maxLevel) {
     Game.nextLevel();
   }
 
   if (Game.bannerTimer > 0) Game.bannerTimer -= dt;
   if (Game.shake > 0) Game.shake -= dt;
   if (Game.flash > 0) Game.flash -= dt;
+  if (Game.bossHintTimer > 0) Game.bossHintTimer -= dt;
 
   /* -- Jeep -- */
   const jeepWorldX = Game.worldOffset + Jeep.x;
@@ -759,26 +911,44 @@ function update(dt) {
 
   if (Jeep.invuln > 0) Jeep.invuln -= dt;
 
-  /* -- Bought ordnance: fires on its own until the run ends -- */
-  if (Jeep.hasMissiles) {
+  /* -- Bought ordnance: each stack adds a shot, fired as a 1,2,3 volley -- */
+  if (Jeep.missiles > 0) {
     Jeep.missileTimer -= dt;
     if (Jeep.missileTimer <= 0) {
       Jeep.missileTimer = CONFIG.missileInterval;
-      const mz = Jeep.muzzle();
-      spawnMissile(mz.x, mz.y, false);          // straight 45° up-right
+      Jeep.salvoLeft = Jeep.missiles;          // this cycle fires 1-3 shots
+      Jeep.salvoTimer = 0;                     // first one leaves immediately
+    }
+    if (Jeep.salvoLeft > 0) {
+      Jeep.salvoTimer -= dt;
+      if (Jeep.salvoTimer <= 0) {
+        const mz = Jeep.muzzle();
+        spawnMissile(mz.x, mz.y, false);       // straight 45° up-right
+        Jeep.salvoLeft--;
+        Jeep.salvoTimer = CONFIG.salvoGap;
+      }
     }
   }
-  if (Jeep.hasHeat) {
+  if (Jeep.heatSeekers > 0) {
     Jeep.heatTimer -= dt;
     if (Jeep.heatTimer <= 0) {
       Jeep.heatTimer = CONFIG.heatInterval;
-      spawnMissile(Jeep.centerX, Jeep.y - 4, true); // red homing missile
+      Jeep.heatSalvoLeft = Jeep.heatSeekers;
+      Jeep.heatSalvoTimer = 0;
+    }
+    if (Jeep.heatSalvoLeft > 0) {
+      Jeep.heatSalvoTimer -= dt;
+      if (Jeep.heatSalvoTimer <= 0) {
+        spawnMissile(Jeep.centerX, Jeep.y - 4, true); // red homing missile
+        Jeep.heatSalvoLeft--;
+        Jeep.heatSalvoTimer = CONFIG.salvoGap;
+      }
     }
   }
 
   /* -- Enemy spawning -- */
   Game.spawnTimer -= dt;
-  if (Game.spawnTimer <= 0 && enemies.length < CONFIG.maxEnemies) {
+  if (Game.spawnTimer <= 0 && enemies.length < CONFIG.maxEnemies && !Game.bossActive) {
     const shrink = Math.max(0.35, 1 - CONFIG.spawnShrinkPerLevel * levelT);
     Game.spawnTimer = rand(CONFIG.spawnMinBase, CONFIG.spawnMaxBase) * shrink;
     // Level 1 is gentle: ground enemies only for the first stretch.
@@ -790,8 +960,9 @@ function update(dt) {
      Arrivals follow an absolute schedule spread across the whole level.
      Bombers are quota units, so they ignore the regular enemy cap (that
      cap used to starve them out at higher levels). */
-  Game.levelElapsed += dt;
-  if (Game.bomberIdx < Game.bomberSchedule.length
+  if (!Game.bossActive) Game.levelElapsed += dt;   // boss fights pause the schedule
+  if (!Game.bossActive
+      && Game.bomberIdx < Game.bomberSchedule.length
       && Game.levelElapsed >= Game.bomberSchedule[Game.bomberIdx]) {
     const anyRetreating = enemies.some(en => en.type === "bomber" && en.retreating);
     const activeBombers = enemies.filter(en => en.type === "bomber" && !en.retreating).length;
@@ -801,12 +972,16 @@ function update(dt) {
     }
   }
 
-  /* -- Meteors (from level 3 onward) -- */
+  /* -- Meteors (from level 3 onward; they keep falling during boss fights) -- */
   if (Game.level >= 3) {
     Game.meteorTimer -= dt;
     if (Game.meteorTimer <= 0) {
-      Game.meteorTimer = rand(CONFIG.meteorMinGap, CONFIG.meteorMaxGap);
-      spawnMeteor();
+      Game.meteorTimer = Game.bossActive
+        ? rand(CONFIG.bossMeteorMinGap, CONFIG.bossMeteorMaxGap)
+        : rand(CONFIG.meteorMinGap, CONFIG.meteorMaxGap);
+      // In a boss fight they slam down between the jeep and the creature, so
+      // the rolling rock is a jumpable hazard without covering the boss.
+      spawnMeteor(Game.bossActive ? 0.30 : 0.55, Game.bossActive ? 0.50 : 0.85);
     }
   }
 
@@ -834,6 +1009,18 @@ function update(dt) {
           spawnBomb(e.x + e.w / 2, e.y + e.h);
         }
       }
+    } else if (e.type === "boss") {
+      // Boss: slides in from the right, then hovers in the arena, swaying.
+      if (e.entry > 0) {
+        e.entry -= dt;
+        const travel = CONFIG.viewW + 8 - e.baseX;
+        e.x = e.baseX + Math.max(0, e.entry / CONFIG.bossEntryTime) * travel;
+        e.y = e.baseY;
+      } else {
+        e.bob += dt * 1.5;
+        e.x = e.baseX + Math.sin(e.bob * 0.9) * 9;
+        e.y = e.baseY + Math.sin(e.bob) * 5;
+      }
     } else {
       // Air enemies hold altitude with a gentle bob.
       e.bob += dt * 2.4;
@@ -844,16 +1031,21 @@ function update(dt) {
     // Each enemy has at most ONE live bullet ("one at a time").
     if (e.myBullet && e.myBullet.dead) e.myBullet = null;
 
+    const isBoss = e.type === "boss";
     const onScreen = e.x < CONFIG.viewW - 4 && e.x + e.w > 0;
-    if (onScreen && !e.myBullet) {
+    const mayFire = onScreen && !e.myBullet && !(isBoss && e.entry > 0);
+    if (mayFire) {
       e.fireTimer -= dt;
       if (e.fireTimer <= 0) {
-        e.fireTimer = rand(CONFIG.enemyFireMin, CONFIG.enemyFireMax) * fireScale;
+        e.fireTimer = isBoss
+          ? rand(CONFIG.bossFireMin, CONFIG.bossFireMax)
+          : rand(CONFIG.enemyFireMin, CONFIG.enemyFireMax) * fireScale;
         // Aim a dot straight at the jeep's current position.
         const sx = e.x + e.w / 2, sy = e.y + e.h / 2;
         const dx = Jeep.centerX - sx, dy = Jeep.centerY - sy;
         const d = Math.hypot(dx, dy) || 1;
-        e.myBullet = spawnBullet(sx, sy, (dx / d) * foeBulletSpeed, (dy / d) * foeBulletSpeed, false, e);
+        const spd = isBoss ? CONFIG.bossBulletSpeed : foeBulletSpeed;
+        e.myBullet = spawnBullet(sx, sy, (dx / d) * spd, (dy / d) * spd, false, e);
         AudioSys.enemyShoot();
       }
     }
@@ -891,7 +1083,9 @@ function update(dt) {
         if (e.dead) continue;
         if (pointInRect(b.x, b.y, e.x - 1, e.y - 1, e.w + 2, e.h + 2)) {
           b.dead = true;
-          if (e.type === "bomber") {
+          if (e.type === "boss") {
+            damageBoss(e, false, b.x, b.y);
+          } else if (e.type === "bomber") {
             // Armored: takes 5-10 hits. Ping off the hull until hp runs out.
             e.hp--;
             e.hitFlash = 0.09;
@@ -1024,7 +1218,9 @@ function update(dt) {
       if (e.dead) continue;
       if (pointInRect(m.x, m.y, e.x - 2, e.y - 2, e.w + 4, e.h + 4)) {
         m.dead = true;
-        if (e.type === "bomber") {
+        if (e.type === "boss") {
+          damageBoss(e, m.heat, m.x, m.y);
+        } else if (e.type === "bomber") {
           e.hp--;
           e.hitFlash = 0.09;
           if (e.hp <= 0) {
@@ -1213,6 +1409,8 @@ function render() {
     if (b.friendly) {
       ctx.fillStyle = COLORS.bulletYou;
       ctx.fillRect(Math.round(b.x) - 1, Math.round(b.y) - 1, 2, 2);
+    } else if (b.bossKind) {
+      drawBossBullet(b);
     } else {
       // Enemy shots are big, mean 4x4 dots.
       ctx.fillStyle = COLORS.bulletFoe;
@@ -1244,6 +1442,7 @@ function render() {
   else if (Game.state === "pause") drawPause();
   else if (Game.state === "shop") drawShop();
   else if (Game.state === "gameover") drawGameOver();
+  else if (Game.state === "victory") drawVictory();
   else if (Game.bannerTimer > 0) {
     const pulse = Math.floor(Game.bannerTimer * 6) % 2 === 0;
     drawTextCentered(Game.banner, 84, 2, pulse ? COLORS.hud : COLORS.hudDim);
@@ -1359,6 +1558,8 @@ function drawEnemy(e) {
     ctx.fillStyle = COLORS.hub;
     ctx.fillRect(x + 6, y + 14, 1, 1);
     ctx.fillRect(x + 18, y + 14, 1, 1);
+  } else if (e.type === "boss") {
+    drawBoss(e);
   } else if (e.type === "bomber") {
     // Red bomber saucer: wide, heavy, angry. Drops big bombs.
     ctx.fillStyle = COLORS.bomber;
@@ -1407,6 +1608,249 @@ function drawEnemy(e) {
     for (let i = 0; i < 4; i++) {
       if (i === blink) ctx.fillRect(x + 4 + i * 7, y + 7, 2, 2);
     }
+  }
+}
+
+/* -- Boss creature art. All three are drawn in blocks at the 480x270 buffer's
+   resolution so they read as chunky 8-bit sprites. -- */
+function drawBoss(e) {
+  // Brighten the sprite itself while a hit lands. A white rect would just
+  // paint the hitbox as a grey card behind the creature.
+  const flash = e.hitFlash > 0;
+  if (flash) ctx.filter = "brightness(2.4)";
+  if (e.bossKind === "spider") drawSpider(e);
+  else if (e.bossKind === "crab") drawCrab(e);
+  else drawOctopus(e);
+  if (flash) ctx.filter = "none";
+}
+
+// SPIDER — level 3. Two-lobed purple body, eight long jointed legs, four eyes.
+function drawSpider(e) {
+  const x = Math.round(e.x), y = Math.round(e.y);
+  const k = Math.floor(performance.now() / 180) % 2;   // leg tick
+
+  // Legs are runs of 3x3 blocks stepping outward: contiguous, so they read as
+  // limbs rather than dashes. Hips sit on the body edge so none are buried.
+  // [hipX, hipY, dx1, dy1, n1, dx2, dy2, n2]
+  const run = (sx, sy, dx, dy, n) => {
+    for (let s = 0; s < n; s++) ctx.fillRect(x + sx + dx * s, y + sy + dy * s, 3, 3);
+  };
+  const legs = [
+    [34, 24, -3, -2, 5, -2, -1, 4],
+    [34, 29, -3, -1, 6, -2,  0, 3],
+    [34, 34, -3,  1, 6, -2,  0, 3],
+    [34, 38, -3,  2, 4, -2,  0, 3],
+    [66, 24,  3, -2, 5,  2, -1, 3],
+    [66, 29,  3, -1, 6,  2,  0, 2],
+    [66, 34,  3,  1, 6,  2,  0, 2],
+    [66, 38,  3,  2, 3,  2,  0, 2],
+  ];
+  ctx.fillStyle = COLORS.bossSpiderDk;
+  for (let i = 0; i < legs.length; i++) {
+    const [hx, hy, dx1, dy1, n1, dx2, dy2, n2] = legs[i];
+    const t = i % 2 === k ? 1 : 0;
+    run(hx, hy + t, dx1, dy1, n1);
+    run(hx + dx1 * (n1 - 1), hy + dy1 * (n1 - 1) + t, dx2, dy2, n2);
+  }
+
+  // Abdomen: tall rounded blob at the rear, with darker banding.
+  ctx.fillStyle = COLORS.bossSpider;
+  ctx.fillRect(x + 46, y + 14, 20, 5);
+  ctx.fillRect(x + 40, y + 19, 30, 12);
+  ctx.fillRect(x + 44, y + 31, 24, 6);
+  ctx.fillRect(x + 50, y + 37, 14, 3);
+  ctx.fillStyle = COLORS.bossSpiderDk;
+  ctx.fillRect(x + 46, y + 21, 18, 3);
+  ctx.fillRect(x + 48, y + 27, 14, 3);
+  ctx.fillRect(x + 53, y + 33, 10, 2);
+
+  // Cephalothorax and head, facing the jeep.
+  ctx.fillStyle = COLORS.bossSpider;
+  ctx.fillRect(x + 24, y + 22, 18, 14);
+  ctx.fillRect(x + 12, y + 24, 14, 12);
+
+  // Four bright eyes.
+  ctx.fillStyle = COLORS.bossEye;
+  ctx.fillRect(x + 13, y + 26, 3, 3);
+  ctx.fillRect(x + 18, y + 26, 3, 3);
+  ctx.fillRect(x + 13, y + 32, 3, 3);
+  ctx.fillRect(x + 18, y + 32, 3, 3);
+  ctx.fillStyle = COLORS.bossPupil;
+  ctx.fillRect(x + 14, y + 27, 1, 1);
+  ctx.fillRect(x + 19, y + 33, 1, 1);
+
+  // Fangs.
+  ctx.fillStyle = COLORS.bossSpiderDk;
+  ctx.fillRect(x + 9, y + 27, 4, 2);
+  ctx.fillRect(x + 9, y + 32, 4, 2);
+}
+
+// CRAB — level 7. Wide carapace, two big raised claws, eyestalks, six legs.
+function drawCrab(e) {
+  const x = Math.round(e.x), y = Math.round(e.y);
+  const lift = Math.round(Math.sin(performance.now() / 500) * 2);
+
+  // Legs: three jointed runs a side, stepping down and outward.
+  const run = (sx, sy, dx, dy, n) => {
+    for (let s = 0; s < n; s++) ctx.fillRect(x + sx + dx * s, y + sy + dy * s, 3, 3);
+  };
+  ctx.fillStyle = COLORS.bossCrabDk;
+  for (let i = 0; i < 3; i++) {
+    const ly = 24 + i * 6;
+    run(30, ly, -4, 2, 3);
+    run(66, ly,  4, 2, 3);
+  }
+
+  // Carapace: wide stepped shell with darker ridges.
+  ctx.fillStyle = COLORS.bossCrab;
+  ctx.fillRect(x + 34, y + 12, 26, 6);
+  ctx.fillRect(x + 28, y + 16, 40, 12);
+  ctx.fillRect(x + 30, y + 28, 36, 6);
+  ctx.fillStyle = COLORS.bossCrabDk;
+  ctx.fillRect(x + 34, y + 19, 26, 3);
+  ctx.fillRect(x + 37, y + 24, 19, 2);
+
+  // Claws: two big pincers at the front, bobbing.
+  ctx.fillStyle = COLORS.bossCrab;
+  ctx.fillRect(x + 16, y + 2 + lift, 22, 9);
+  ctx.fillRect(x + 10, y + 7 + lift, 10, 8);
+  ctx.fillRect(x + 18, y + 30 - lift, 20, 9);
+  ctx.fillRect(x + 12, y + 32 - lift, 10, 8);
+  ctx.fillStyle = COLORS.bossCrabDk;
+  ctx.fillRect(x + 18, y + 11 + lift, 14, 3);    // upper pincer mouth
+  ctx.fillRect(x + 18, y + 30 - lift, 12, 3);    // lower pincer mouth
+  ctx.fillRect(x + 30, y + 4 + lift, 6, 8);      // arms into the shell
+  ctx.fillRect(x + 30, y + 30 - lift, 6, 8);
+
+  // Eyestalks with big white eyes.
+  ctx.fillStyle = COLORS.bossCrabDk;
+  ctx.fillRect(x + 42, y + 6, 2, 8);
+  ctx.fillRect(x + 54, y + 6, 2, 8);
+  ctx.fillStyle = COLORS.bossEye;
+  ctx.fillRect(x + 39, y + 1, 7, 6);
+  ctx.fillRect(x + 51, y + 1, 7, 6);
+  ctx.fillStyle = COLORS.bossPupil;
+  ctx.fillRect(x + 41, y + 3, 2, 2);
+  ctx.fillRect(x + 53, y + 3, 2, 2);
+}
+
+// OCTOPUS — the level 10 final boss. Eight wriggling tentacles under a huge
+// 8-bit head. Immune to bullets and plain missiles: 20 heat seekers only.
+function drawOctopus(e) {
+  const x = Math.round(e.x), y = Math.round(e.y);
+  const t = performance.now() / 1000;
+
+  // Tentacles: eight columns of blocks, each swaying on its own phase.
+  for (let i = 0; i < 8; i++) {
+    const bx = x + 12 + i * 12;
+    const sway = Math.sin(t * 2.2 + i * 0.8);
+    for (let s = 0; s < 5; s++) {
+      const w = 10 - s;
+      const off = Math.round(sway * s * 1.2);
+      ctx.fillStyle = i % 2 ? COLORS.bossOctoDk : COLORS.bossOcto;
+      ctx.fillRect(bx + off, y + 44 + s * 5, w, 5);
+    }
+    ctx.fillStyle = COLORS.bossEye;
+    ctx.fillRect(bx + Math.round(sway * 4) + 4, y + 48, 1, 1);   // sucker
+  }
+
+  // Head: stacked rows, widest in the middle — a big 8-bit dome.
+  ctx.fillStyle = COLORS.bossOcto;
+  ctx.fillRect(x + 32, y + 2, 48, 6);
+  ctx.fillRect(x + 22, y + 8, 68, 8);
+  ctx.fillRect(x + 14, y + 16, 84, 12);
+  ctx.fillRect(x + 8, y + 28, 96, 12);
+  ctx.fillRect(x + 12, y + 40, 88, 8);
+  ctx.fillStyle = COLORS.bossOctoDk;
+  ctx.fillRect(x + 12, y + 44, 88, 4);            // darker underside
+  ctx.fillRect(x + 18, y + 26, 8, 4);             // skin blotches
+  ctx.fillRect(x + 86, y + 26, 8, 4);
+
+  // Two big white eyes with pupils looking at the jeep.
+  ctx.fillStyle = COLORS.bossEye;
+  ctx.fillRect(x + 30, y + 16, 18, 16);
+  ctx.fillRect(x + 64, y + 16, 18, 16);
+  ctx.fillStyle = COLORS.bossPupil;
+  ctx.fillRect(x + 33, y + 20, 8, 8);
+  ctx.fillRect(x + 67, y + 20, 8, 8);
+
+  // Beak.
+  ctx.fillStyle = COLORS.bossBeak;
+  ctx.fillRect(x + 50, y + 36, 14, 6);
+  ctx.fillStyle = COLORS.bossOctoDk;
+  ctx.fillRect(x + 52, y + 41, 10, 2);
+}
+
+// Boss projectiles are tiny copies of the creature that fired them: a small
+// sprite plus a halo that pulses as it flies. The hitbox is still a point, so
+// the size is purely cosmetic.
+function drawBossBullet(b) {
+  const x = Math.round(b.x), y = Math.round(b.y);
+  const kind = b.bossKind;
+  const color = kind === "spider" ? COLORS.bossSpider
+    : kind === "crab" ? COLORS.bossCrab
+    : COLORS.bossOcto;
+  const dark = kind === "spider" ? COLORS.bossSpiderDk
+    : kind === "crab" ? COLORS.bossCrabDk
+    : COLORS.bossOctoDk;
+
+  // Pulsing halo: eight pixels that breathe outward and fade. Keeping it
+  // pixel-sized avoids the "selection box" look of a stroked rectangle.
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 110);
+  const r = Math.round(5 + pulse * 2);        // 5..7 px from the centre
+  const d = Math.round(r * 0.7);
+  ctx.globalAlpha = 0.3 + (1 - pulse) * 0.45;
+  ctx.fillStyle = color;
+  for (const [dx, dy] of [[r, 0], [-r, 0], [0, r], [0, -r], [d, d], [d, -d], [-d, d], [-d, -d]]) {
+    ctx.fillRect(x + dx, y + dy, 1, 1);
+  }
+  ctx.globalAlpha = 1;
+
+  // A dark silhouette behind the body keeps each little monster readable
+  // against the black sky.
+  ctx.fillStyle = dark;
+  if (kind === "spider") {
+    ctx.fillRect(x - 3, y - 3, 7, 7);
+    ctx.fillRect(x - 4, y - 2, 2, 1);          // legs
+    ctx.fillRect(x - 4, y + 1, 2, 1);
+    ctx.fillRect(x + 3, y - 2, 2, 1);
+    ctx.fillRect(x + 3, y + 1, 2, 1);
+    ctx.fillRect(x - 1, y - 4, 3, 1);
+  } else if (kind === "crab") {
+    ctx.fillRect(x - 4, y - 2, 9, 5);
+    ctx.fillRect(x - 5, y - 4, 2, 2);          // claws
+    ctx.fillRect(x + 4, y - 4, 2, 2);
+    ctx.fillRect(x - 3, y + 2, 2, 1);          // legs
+    ctx.fillRect(x, y + 2, 1, 1);
+    ctx.fillRect(x + 2, y + 2, 2, 1);
+  } else {
+    ctx.fillRect(x - 4, y - 3, 9, 6);
+    ctx.fillRect(x - 3, y + 3, 2, 1);          // tentacle tips
+    ctx.fillRect(x, y + 3, 1, 1);
+    ctx.fillRect(x + 2, y + 3, 2, 1);
+  }
+
+  ctx.fillStyle = color;
+  if (kind === "spider") {
+    ctx.fillRect(x - 2, y - 2, 5, 5);          // body
+    ctx.fillStyle = COLORS.bossEye;
+    ctx.fillRect(x - 1, y - 1, 1, 1);          // eyes
+    ctx.fillRect(x + 1, y - 1, 1, 1);
+  } else if (kind === "crab") {
+    ctx.fillRect(x - 3, y - 1, 7, 3);          // shell
+    ctx.fillRect(x - 5, y - 4, 2, 2);          // claws
+    ctx.fillRect(x + 4, y - 4, 2, 2);
+    ctx.fillStyle = COLORS.bossEye;
+    ctx.fillRect(x - 2, y - 2, 1, 1);          // eyes
+    ctx.fillRect(x + 1, y - 2, 1, 1);
+  } else {
+    ctx.fillRect(x - 3, y - 2, 7, 4);          // dome
+    ctx.fillRect(x - 3, y + 2, 2, 2);          // tentacles
+    ctx.fillRect(x, y + 2, 1, 2);
+    ctx.fillRect(x + 2, y + 2, 2, 2);
+    ctx.fillStyle = COLORS.bossEye;
+    ctx.fillRect(x - 2, y - 1, 1, 1);          // eyes
+    ctx.fillRect(x + 1, y - 1, 1, 1);
   }
 }
 
@@ -1467,12 +1911,40 @@ function drawHUD() {
     for (let i = 0; i < Game.shield; i++) { ctx.fillRect(px, 15, 2, 3); px += 4; }
     px += 3;
   }
-  if (Jeep.hasMissiles) { drawText("MSL", px, 14, 1, COLORS.hud); px += 13; }
-  if (Jeep.hasHeat) { drawText("HEAT", px, 14, 1, COLORS.bomber); px += 17; }
+  if (Jeep.missiles > 0) {
+    const s = "MSL " + Jeep.missiles;
+    drawText(s, px, 14, 1, COLORS.hud);
+    px += textWidth(s, 1) + 5;
+  }
+  if (Jeep.heatSeekers > 0) {
+    const s = "HEAT " + Jeep.heatSeekers;
+    drawText(s, px, 14, 1, COLORS.bomber);
+    px += textWidth(s, 1) + 5;
+  }
 
   const lvl = "LEVEL " + Game.level;
   drawText(lvl, CONFIG.viewW - textWidth(lvl, 1) - 6, 6, 1, COLORS.hud);
   if (AudioSys.muted) drawText("MUTED", CONFIG.viewW - textWidth("MUTED", 1) - 6, 14, 1, COLORS.hudDim);
+
+  // Boss health: name over a bar, plus the octopus' immunity hint. Only while
+  // a fight is actually running — not over the game-over or victory screens.
+  const boss = (Game.state === "play" || Game.state === "pause" || Game.state === "shop")
+    ? enemies.find(e => e.type === "boss" && !e.dead)
+    : null;
+  if (boss) {
+    const bw = 160, bx = Math.round((CONFIG.viewW - bw) / 2), by = 26;
+    drawTextCentered(boss.name, by - 9, 1, enemyMainColor(boss));
+    ctx.strokeStyle = COLORS.hudDim;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bx + 0.5, by + 0.5, bw, 5);
+    const frac = Math.max(0, boss.hp / boss.maxHp);
+    ctx.fillStyle = boss.heatOnly ? COLORS.bulletYou : COLORS.bomber;
+    ctx.fillRect(bx + 1, by + 1, Math.round((bw - 1) * frac), 4);
+    if (boss.heatOnly) {
+      const hot = Game.bossHintTimer > 0 && Math.floor(performance.now() / 120) % 2 === 0;
+      drawTextCentered("HEAT SEEKERS ONLY", by + 12, 1, hot ? COLORS.bulletFoe : COLORS.hudDim);
+    }
+  }
 
   // Fullscreen button (top-right corner) — bigger and clearly a button.
   const fx = CONFIG.viewW - 30, fy = 15;
@@ -1495,8 +1967,8 @@ function drawHUD() {
 
 function drawTitle() {
   shade();
-  drawTextCentered("MOON PATROL", 70, 3, COLORS.jeepBody);
-  drawTextCentered("SURVIVE THE MOON", 104, 1, COLORS.hud);
+  drawTextCentered("MOON RANGER", 70, 3, COLORS.jeepBody);
+  drawTextCentered("PATROL THE MOON", 104, 1, COLORS.hud);
   drawTextCentered("W/UP JUMP   A/D AIM GUN", 126, 1, COLORS.hudDim);
   drawTextCentered("SPACE FIRE  P PAUSE  M MUTE", 138, 1, COLORS.hudDim);
   drawTextCentered("B BUY MENU  F FULLSCREEN", 150, 1, COLORS.hudDim);
@@ -1522,7 +1994,7 @@ function drawShop() {
     const it = SHOP_ITEMS[i];
     const owned = it.owned();
     const afford = Game.score >= it.price();
-    const label = (i + 1) + " " + it.name + (owned ? "  OWNED" : "  " + it.price());
+    const label = (i + 1) + " " + it.name + (owned ? "  MAX" : "  " + it.price());
     drawTextCentered(label, 112 + i * 13, 1, owned ? COLORS.hudDim : afford ? COLORS.hud : COLORS.bulletFoe);
   }
 
@@ -1542,6 +2014,17 @@ function drawGameOver() {
   drawTextCentered("REACHED LEVEL " + Game.level, 166, 1, COLORS.hudDim);
   if (Math.floor(performance.now() / 400) % 2 === 0) {
     drawTextCentered("PRESS SPACE TO RETRY", 192, 1, COLORS.groundRim);
+  }
+}
+
+function drawVictory() {
+  shade();
+  drawTextCentered("MOON SAVED", 78, 3, COLORS.jeepBody);
+  drawTextCentered("OCTOPUS DESTROYED", 118, 1, COLORS.hud);
+  drawTextCentered("CURRENCY " + Math.floor(Game.score), 140, 1, COLORS.bulletYou);
+  drawTextCentered("HI-SCORE " + Game.hiScore, 152, 1, COLORS.bulletFoe);
+  if (Math.floor(performance.now() / 400) % 2 === 0) {
+    drawTextCentered("PRESS SPACE TO PLAY AGAIN", 178, 1, COLORS.groundRim);
   }
 }
 
@@ -1605,7 +2088,7 @@ fitCanvas();
 Jeep.y = Terrain.groundY(Jeep.x) - CONFIG.jeepH;
 
 // Debug/testing handle (harmless in production): inspect state from devtools.
-window.GAME = { Game, Jeep, Terrain, CONFIG, get enemies() { return enemies; }, get bullets() { return bullets; } };
+window.GAME = { Game, Jeep, Terrain, CONFIG, get enemies() { return enemies; }, get bullets() { return bullets; }, get meteors() { return meteors; } };
 
 const STEP = 1 / 60;
 let acc = 0, last = performance.now();

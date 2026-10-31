@@ -1,10 +1,58 @@
 # Changelog
 
-All notable changes to MOON PATROL are documented here. This project follows simple semantic versioning: every gameplay or feature change bumps the version by 0.0.1.
+All notable changes to MOON RANGER are documented here. This project follows simple semantic versioning: every gameplay or feature change bumps the version by 0.0.1.
 
 The versions below map one-to-one to the conversation in which the game was built — each entry is one iteration of feedback and polish.
 
 ---
+
+## [0.0.15] — Patrol the Moon
+
+- The title screen tagline now reads **PATROL THE MOON** instead of SURVIVE THE MOON
+
+## [0.0.14] — Boss shots are baby bosses
+
+- Each boss now fires a miniature copy of itself instead of a red dot, with a
+  pulsing halo as it flies
+- Spider, crab and octopus shots each use their own mini sprite and colour, so
+  you can read which creature is shooting at you
+
+## [0.0.13] — Tougher bosses
+
+- Boss hit counts doubled: the spider and crab now take six times a red ship's
+  hits (30–60, up from 15–30)
+- The octopus now needs 20 heat-seeker hits (up from 10)
+
+## [0.0.12] — Rebrand: MOON RANGER
+
+- The game is now **MOON RANGER** (previously MOON PATROL): the title screen,
+  page title, README and developer walkthrough all use the new name
+- Local save keys are now `moonranger_hi` and `moonranger_muted`, so a high score
+  or mute setting saved under the old keys does not carry over
+
+## [0.0.11] — Boss meteor fire & stacked ordnance
+
+- Meteorites now keep falling during boss fights, on their own faster cadence,
+  slamming down between the jeep and the creature so they can be jumped
+- Missiles and heat seekers can be bought up to **3** times each and stack like
+  shields; every cycle now launches one shot per stack, in a 1, 2, 3… volley
+- The HUD shows the stack count (`MSL 3`, `HEAT 2`), and the shop shows `MAX`
+  instead of `OWNED` when you hold all three
+
+## [0.0.10] — Boss levels
+
+- Levels 3, 7 and 10 now end with a boss: reaching the finish line spawns it, and
+  the level cannot advance until it is destroyed
+- **Spider** (level 3) and **Crab** (level 7) take three times a red ship's hits
+  (15–30), with a health bar and name shown at the top of the screen
+- **Octopus** (level 10) is an oversized 8-bit final boss: bullets and ordinary
+  missiles bounce off, and only 10 heat-seeker hits can destroy it. Reach it
+  without heat seekers and short of the 500 price, and the game fronts you the
+  difference so the final fight can't dead-end
+- Boss fights slow the world to a third speed and pause regular spawning,
+  meteorites and bomber arrivals
+- Destroying the Octopus ends the run on a new **MOON SAVED** victory screen
+- Each boss pays a 900-credit bounty
 
 ## [0.0.9] — Rover variety
 
@@ -45,9 +93,9 @@ The versions below map one-to-one to the conversation in which the game was buil
 - New large **red bomber saucer**: hovers across the top of the screen and drops a heavy bomb — 1 on level 1, 2 on level 2, 3 on every level after
 - New **meteorites** from level 3 onward: fall from the top-right, slam into the ground right of center, then roll toward the jeep — they must be jumped and cannot be shot
 
-## [0.0.2] — MOON PATROL retheme & handling pass
+## [0.0.2] — Moon theme & handling pass
 
-- Renamed to **MOON PATROL**: gray lunar terrain with craters, alien rovers on the ground, silver UFOs in the sky
+- Rethemed to the moon: gray lunar terrain with craters, alien rovers on the ground, silver UFOs in the sky
 - Gun can now aim below horizontal so ground targets are hittable
 - Enemies are taller; enemy shots are larger
 - Higher jumps with slower, floatier falls (low lunar gravity)

@@ -1,4 +1,4 @@
-# MOON PATROL — Developer Walkthrough
+# MOON RANGER — Developer Walkthrough
 
 A complete orientation for a developer joining this project. Read it top to bottom
 once (~25 minutes), then keep it open as a map while you work.
@@ -8,7 +8,7 @@ a jeep across lunar terrain, jump enemy fire, and shoot rovers, UFOs, and red bo
 saucers. Score doubles as currency, which you spend on shields and missiles.
 
 **What the codebase is:** four source files and three docs. No framework, no bundler, no
-package manager, no dependencies, no build step, no tests. `game.js` is ~1,620 lines of
+package manager, no dependencies, no build step, no tests. `game.js` is ~2,000 lines of
 plain JavaScript in one file, organized into ten numbered sections.
 
 ---
@@ -72,15 +72,15 @@ node --check game.js     # syntax
   units-per-second and gameplay is identical on a 60 Hz or 144 Hz display.
 - **Score is currency.** It trickles up with distance and jumps on kills; the buy menu
   (key **B**) subtracts what you spend. There is no separate points counter.
-- **One state machine, five states:** `title`, `play`, `pause`, `shop`, `gameover`.
-  `update()` dispatches on `Game.state`; `render()` always draws the world, then overlays
-  the relevant screen.
+- **One state machine, six states:** `title`, `play`, `pause`, `shop`, `gameover`,
+  `victory`. `update()` dispatches on `Game.state`; `render()` always draws the world,
+  then overlays the relevant screen.
 
 ## 3. File-by-file tour
 
 | File | Lines | What it holds |
 | --- | --- | --- |
-| [game.js](game.js) | ~1,620 | The entire game. Read this; everything else is a shell. |
+| [game.js](game.js) | ~2,000 | The entire game. Read this; everything else is a shell. |
 | [index.html](index.html) | 15 | One `<canvas id="game">` and a classic (non-module) `<script src="game.js">`. |
 | [style.css](style.css) | 28 | Full-window black page, pixelated canvas scaling. No game logic. |
 | [vercel.json](vercel.json) | 6 | Marks the folder as a static deployment with no build. |
@@ -102,7 +102,7 @@ Two facts worth internalizing:
 ## 4. How one frame works
 
 ```js
-// game.js:1613 — the whole loop
+// game.js:1978 — the whole loop
 function frame(now) {
   acc += Math.min(0.1, (now - last) / 1000);  // seconds since last frame, clamped
   last = now;
@@ -125,12 +125,12 @@ Inside `update(1/60)` during `play`, phases run in a fixed order (search for the
 `/* -- ... -- */` comment banners):
 
 ```
-world scroll + distance + currency trickle + level check
+world scroll + distance + currency trickle + level check (a boss holds the line)
 banner/shake/flash timers
 jeep: jump, terrain snap, gun aim, fire
 bought ordnance: missiles / heat seekers
-enemy spawning  →  bomber schedule  →  meteor spawner
-enemies: move, fire one aimed dot, ram check
+enemy spawning  →  bomber schedule  →  meteor spawner   (spawns/bombers pause in boss fights)
+enemies: move (a boss slides in, then hovers), fire one aimed dot, ram check
 bullets: move, terrain burial, hit enemies/meteors, hit jeep
 bombs: fall, hit jeep or ground
 meteors: fall → impact → roll
@@ -154,26 +154,26 @@ if you add a section.
 | # | Section | Start | What it does |
 | --- | --- | --- | --- |
 | 1 | CONFIG | [L38](game.js#L38) | Every tunable number. Rebalancing should not require touching logic. |
-| 2 | PALETTE | [L133](game.js#L133) | `COLORS`, including the five rotating rover colorways. |
-| 3 | AUDIO | [L176](game.js#L176) | `AudioSys`: square-wave beeps and filtered noise, lazily created on first input, mute persisted to `localStorage`. |
-| 4 | INPUT | [L245](game.js#L245) | `Keys` (held) and `Pressed` (edge-triggered) maps, plus helpers. |
-| 5 | TERRAIN | [L285](game.js#L285) | `groundY()` / `slope()` / difficulty `ramp()`. |
-| 6 | ENTITIES | [L320](game.js#L320) | `Jeep` singleton, pools, spawners, `damageJeep()`, particles. |
-| 7 | GAME STATE | [L535](game.js#L535) | `Game` object: state string, currency, level, bomber schedule, transitions. |
-| 8 | UPDATE | [L652](game.js#L652) | The fixed-step simulation. The biggest function in the file. |
-| 9 | RENDER | [L1149](game.js#L1149) | Pixel font, starfield, terrain drawing, all entity drawing, HUD, overlays. |
-| 10 | MAIN LOOP | [L1554](game.js#L1554) | Pointer input, fullscreen, letterbox resizing, the frame loop. |
+| 2 | PALETTE | [L158](game.js#L158) | `COLORS`, including the five rotating rover colorways and the boss colors. |
+| 3 | AUDIO | [L211](game.js#L211) | `AudioSys`: square-wave beeps and filtered noise, lazily created on first input, mute persisted to `localStorage`. |
+| 4 | INPUT | [L283](game.js#L283) | `Keys` (held) and `Pressed` (edge-triggered) maps, plus helpers. |
+| 5 | TERRAIN | [L323](game.js#L323) | `groundY()` / `slope()` / difficulty `ramp()`. |
+| 6 | ENTITIES | [L358](game.js#L358) | `Jeep` singleton, pools, spawners, bosses, `damageJeep()`, particles. |
+| 7 | GAME STATE | [L658](game.js#L658) | `Game` object: state string, currency, level, bomber schedule, transitions. |
+| 8 | UPDATE | [L795](game.js#L795) | The fixed-step simulation. The biggest function in the file. |
+| 9 | RENDER | [L1345](game.js#L1345) | Pixel font, starfield, terrain drawing, all entity drawing, HUD, overlays. |
+| 10 | MAIN LOOP | [L2037](game.js#L2037) | Pointer input, fullscreen, letterbox resizing, the frame loop. |
 
 ### Reading order recommendation
 
 1. `CONFIG` → `COLORS`: learn the vocabulary. Half the game is names and numbers.
-2. `Terrain.groundY()` ([L285](game.js#L285)): 15 lines, and suddenly hills make sense.
-3. `Jeep` ([L320](game.js#L320)): the player's whole data model.
-4. `Game` ([L535](game.js#L535)): the state machine and level/bomber scheduling.
-5. `update()` ([L652](game.js#L652)): read it in phases; don't try to hold 420 lines at once.
-6. `drawText()` + `render()` ([L1122](game.js#L1122), [L1149](game.js#L1149)): there is no
+2. `Terrain.groundY()` ([L323](game.js#L323)): 15 lines, and suddenly hills make sense.
+3. `Jeep` ([L358](game.js#L358)): the player's whole data model.
+4. `Game` ([L658](game.js#L658)): the state machine and level/bomber scheduling.
+5. `update()` ([L795](game.js#L795)): read it in phases; don't try to hold 500 lines at once.
+6. `drawText()` + `render()` ([L1318](game.js#L1318), [L1345](game.js#L1345)): there is no
    `ctx.fillText` anywhere — all text is a hand-drawn 3×5 bitmap font.
-7. `frame()` ([L1613](game.js#L1613)): the loop, and you're done.
+7. `frame()` ([L2096](game.js#L2096)): the loop, and you're done.
 
 ## 6. Coordinate systems and hitboxes
 
@@ -212,24 +212,26 @@ wheels extend ~6 px below it, and the ground contact point used for tilting is
 
 ### The `Game` singleton
 
-Everything that survives a frame lives on `Game` ([L535](game.js#L535)) or `Jeep`.
+Everything that survives a frame lives on `Game` ([L658](game.js#L658)) or `Jeep`.
 Highlights:
 
 | Field | Meaning |
 | --- | --- |
-| `state` | `"title" \| "play" \| "pause" \| "shop" \| "gameover"` |
+| `state` | `"title" \| "play" \| "pause" \| "shop" \| "gameover" \| "victory"` |
+| `bossActive`, `bossDefeated`, `bossHintTimer` | Boss-fight bookkeeping (see below) |
 | `score` | Currency. A float; always display with `Math.floor`. |
-| `hiScore` | Peak currency, persisted to `localStorage.moonpatrol_hi` |
+| `hiScore` | Peak currency, persisted to `localStorage.moonranger_hi` |
 | `shield` | Shield charges (small +1, large +3) |
 | `level`, `distance` | Level is derived from cumulative distance |
 | `worldOffset` | Total pixels scrolled; feeds all terrain sampling |
 | `bomberSchedule`, `bomberIdx`, `levelElapsed` | Per-level red-ship timeline |
+| `Jeep.missiles`, `Jeep.heatSeekers` | Bought stacks (0–3); each stack adds a shot per volley |
 | `shake`, `flash`, `bannerTimer` | Presentation timers |
 
 ### Entities and pools
 
 There are three pools — bullets, enemies, sparks — created by
-[`makePool()`](game.js#L362). Objects are never allocated during play:
+[`makePool()`](game.js#L408). Objects are never allocated during play:
 
 ```js
 const b = bulletPool.get();   // reuse or create
@@ -247,7 +249,7 @@ budget for it explicitly instead of removing that check.
 
 ### The death path
 
-All player damage funnels through [`damageJeep()`](game.js#L391):
+All player damage funnels through [`damageJeep()`](game.js#L437):
 
 ```
 invulnerable?  → ignore
@@ -257,6 +259,38 @@ otherwise      → explode, Game.gameOver()
 
 Called by: enemy bullets, ground-rover rams, bombs, rolling meteors. If you add a new
 hazard, call this — never set the state to `"gameover"` directly.
+
+### Bosses
+
+Levels 3, 7 and 10 end with a boss listed in `CONFIG.bosses`. The machinery:
+
+- `update()` holds the finish line while `CONFIG.bosses[Game.level]` exists and
+  `Game.bossDefeated` is false,  calling [`spawnBoss()`](game.js#L514) once. That is
+  what stops the level advancing.
+- A boss is an ordinary entry in `enemies` with `type: "boss"`, so drawing,
+  collision and homing reuse the existing loops. It carries `bossKind`
+  (`spider` / `crab` / `octopus`), `baseX`/`baseY` (its hover point), `entry`
+  (seconds left sliding in) and `heatOnly` (its damage rule).
+- Spider and crab HP is `bossHpFactor * (bossHpBase + rand(0..5))` — 6× a red
+  ship's 5–10, so 30–60. The octopus is `octopusHeatHits` (20) and
+  [`damageBoss(e, fromHeat)`](game.js#L555) ignores every hit that isn't a heat
+  seeker.
+- Boss shots copy `bossKind` onto the bullet at spawn (so it survives the boss
+  dying and being pooled) and draw through
+  [`drawBossBullet()`](game.js#L1787) as a miniature of the creature with a
+  pulsing halo. The projectile hitbox is still a point.
+- While `Game.bossActive`, scroll drops to `bossScrollFactor` and regular
+  spawning and bomber arrivals are skipped. Meteorites keep falling on their own
+  faster cadence (`bossMeteorMinGap`/`MaxGap`) and land between the jeep and the
+  creature, so they stay jumpable without covering the boss.
+- `damageBoss()` is the only way a boss dies: it pays the bounty, then either
+  calls `nextLevel()` or, on level 10, `Game.victory()`.
+- The health bar lives in `drawHUD()` and only draws during `play`, `pause` and
+  `shop` so it doesn't bleed onto the game-over or victory screens.
+
+Testing catch: jumping levels from the console while a boss is alive leaves
+`bossActive` true, so the next level's boss never spawns. Clear `enemies` and
+reset both flags first (see the recipes below).
 
 ### Input edges
 
@@ -290,20 +324,26 @@ Other fixed numbers worth knowing:
 - **Meteors:** from level 3, every 5–9 s, fall for 1.1 s, then roll at 36 px/s + scroll.
 - **Currency:** kills pay 100 / 150 / 300; distance pays 0.02 per px (≈1.4/s at level 1).
 - **Shop:** small shield 100, large shield 300, missiles 300, heat seekers 500. Missiles
-  auto-fire every 2.5 s; heat seekers every 1.8 s and steer at 4.6 rad/s.
+  auto-fire every 2.5 s; heat seekers every 1.8 s and steer at 4.6 rad/s. Both stack
+  up to 3, and each cycle fires one shot per stack (1, 2, 3) spaced by `salvoGap`.
+- **Bosses:** guard levels 3, 7 and 10. Spider and crab take 30–60 hits and pay
+  900; the octopus takes 20 heat-seeker hits and ends the run. While one is alive
+  the scroll drops to 35%, the finish line holds, and meteorites rain down every
+  3.5–6.5 s.
 
 ## 9. Debugging and testing recipes
 
 There are no tests, so the fastest way to verify behavior is from the devtools console.
-The game exposes a handle ([L1608](game.js#L1608)):
+The game exposes a handle ([L2091](game.js#L2091)):
 
 ```js
 GAME.Game        // state, score, level, distance, shield, bomberSchedule...
-GAME.Jeep        // y, vy, airborne, gunAngle, hasMissiles, hasHeat
+GAME.Jeep        // y, vy, airborne, gunAngle, missiles, heatSeekers
 GAME.Terrain     // level, groundY(worldX), slope(worldX), ramp()
 GAME.CONFIG      // live-tweakable: change a number and feel it immediately
 GAME.enemies     // live array (getter)
 GAME.bullets     // live array (getter)
+GAME.meteors     // live array (getter)
 ```
 
 Handy snippets:
@@ -328,6 +368,13 @@ GAME.Game.shield = 3;
 // Force a spawn on the next frame (no public spawner exists)
 GAME.Game.spawnTimer = 0;
 
+// Jump straight into a boss fight. Clear a live boss first or the next one
+// will never spawn (bossActive stays true).
+GAME.enemies.length = 0;
+GAME.Game.bossActive = false; GAME.Game.bossDefeated = false;
+GAME.Game.level = 7; GAME.Terrain.setLevel(7); GAME.Game.scheduleBombers();
+GAME.Game.distance = GAME.CONFIG.levelLength * 7 - 1;
+
 // Freeze the world and inspect draw code while paused
 GAME.Game.state = "pause";
 ```
@@ -348,27 +395,30 @@ Change numbers, hard-refresh, play. Nothing else needs to move.
 ### Add a new ground enemy
 
 1. Add its colors to `COLORS`.
-2. Add a `type` branch in [`spawnEnemy()`](game.js#L423): set `w`, `h`, `y`, `fireTimer`,
+2. Add a `type` branch in [`spawnEnemy()`](game.js#L472): set `w`, `h`, `y`, `fireTimer`,
    and any `hp`.
 3. Add its movement in the enemies loop of `update()`, and make sure its `y` is re-snapped
    to `Terrain.groundY(...)` if it walks.
-4. Add a `drawEnemy()` branch ([L1328](game.js#L1328)) using `Math.round(x)`, `Math.round(y)`.
+4. Add a `drawEnemy()` branch ([L1527](game.js#L1527)) using `Math.round(x)`, `Math.round(y)`.
 5. Add its currency value in the friendly-bullet collision block.
 6. Bump the version, update the README rules, add a CHANGELOG entry.
 
 ### Add a shop item
 
 1. Price in `CONFIG`; an ownership getter and `apply()` in
-   [`SHOP_ITEMS`](game.js#L632).
+   [`SHOP_ITEMS`](game.js#L775).
 2. That's it for buying — `buyShopItem()` and `drawShop()` iterate the array.
 3. **Layout caveat:** `drawShop()` positions rows at `112 + i * 13` and prints the
    "can't buy" warning at y 172. A fifth item lands at y 164 and crowds that warning, and
    the "1-4 BUY" hint at the bottom becomes stale — adjust both if you add one.
-4. Show ownership in the HUD the way `MSL`/`HEAT` do, and reset it in `Jeep.reset()`.
+4. Show ownership in the HUD the way `MSL 3`/`HEAT 2` do, and reset it in `Jeep.reset()`.
+5. For a **stackable** item, make `owned()` a `>= CONFIG.maxXStacks` check and bump a
+   counter in `apply()`. The missiles and heat seekers are the template: counters and
+   volley timers on `Jeep`, volley firing in `update()`, and the count in `drawHUD()`.
 
 ### Add a HUD string
 
-Use only glyphs in the `FONT` table ([L1107](game.js#L1107)): `A–Z`, `0–9`, space, and
+Use only glyphs in the `FONT` table ([L1303](game.js#L1303)): `A–Z`, `0–9`, space, and
 `- ! . : / > <`. Uppercase everything; unknown characters are silently skipped (you'll
 get a gap in the text). If you need a new character, add a 3×5 glyph there — each row is
 a 3-bit mask with the most significant bit on the left. Note that `+` and `—` are
@@ -391,7 +441,7 @@ currently missing, which is why the shop names render with a gap.
 - **Tuning numbers go in `CONFIG`/`COLORS`**, not inline in logic.
 - **One semantic version bump per change**, in three places: `CONFIG.version`
   ([L40](game.js#L40)), the "current version" line in the README, and a new CHANGELOG
-  entry at the top. They are currently in sync at 0.0.9; keep them that way.
+  entry at the top. They are currently in sync at 0.0.15; keep them that way.
 - **Keep the file map and section banners accurate** if you add a section.
 - **The README is player-facing.** If a change is visible to players (rules, controls,
   new enemies), update it in the same pass.
