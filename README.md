@@ -1,4 +1,4 @@
-# MOON PATROL
+# MOON RANGER
 
 An Atari-style 2D side-scrolling survival shooter for the browser. Drive an
 open-top jeep with a mounted gun over increasingly cratered lunar terrain, jump enemy
