@@ -6,6 +6,36 @@ The versions below map one-to-one to the conversation in which the game was buil
 
 ---
 
+## [0.1.0] — The Patrol: endless sectors
+
+- The run no longer ends at the Octopus. Beating it shows **MOON SAVED**, then
+  the game continues into the endless **Patrol** — sector 11, 12, 13…
+- Levels become unbounded **sectors**. Sectors 1–10 play exactly as before; past
+  that, difficulty comes from density rather than runaway numbers: enemies on
+  screen go 4 → 5 (sector 15) → 6 (sector 25), spawn and fire gaps keep
+  tightening to fixed floors, and enemy shot speed caps at 240 px/s. Terrain
+  still tops out at its level-10 hills.
+- Every Patrol sector carries one **modifier**, named in the banner and listed
+  in the HUD: **METEOR STORM** (rocks every 1–2 s, max four), **BOMBER WING**
+  (more ships, bombs twice as often), **AIR RAID** / **GROUND SWARM** (80% of
+  one enemy type, 15% faster), **LOW GRAVITY** (higher, floatier jumps),
+  **ARMORED** (rovers and saucers take two hits), **BLACKOUT** (no stars or
+  terrain rim, enemies lit brighter) and **FAST FORWARD** (+25% scroll).
+  None repeat within three sectors, boss sectors never carry one, and sector 11
+  always opens with BLACKOUT or LOW GRAVITY.
+- **Bosses return:** every 5 sectors from 15, rotating spider → crab → octopus,
+  each visit 25% tougher. Repeat visits add elite traits — **FRENZIED** (aimed
+  shots 25% faster) from the second, **SHIELDED** (regains 1 HP every 6 s, and
+  any hit restarts that clock) from the third. A recurring octopus is still
+  heat-seeker-only.
+- New saved records: `moonranger_depth` (deepest sector, shown as DEEPEST
+  SECTOR on the title screen) and `moonranger_cleared` (campaign beaten). The
+  game-over screen now reports the sector you reached.
+- The 500-credit emergency handout for the heat-seeker-only Octopus now happens
+  only on the first one, so recurring octopuses can't be farmed for credits.
+- Banner text now sits on a dark band, keeping long `SECTOR 12 - METEOR STORM`
+  lines readable over passing enemies, and the pixel font gained a `+` glyph.
+
 ## [0.0.15] — Patrol the Moon
 
 - The title screen tagline now reads **PATROL THE MOON** instead of SURVIVE THE MOON

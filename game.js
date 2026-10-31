@@ -15,10 +15,10 @@
      F              .... toggle fullscreen
      Space / Click  .... start & restart
 
-   See CHANGELOG.md for the version history (current: v0.0.15).
+   See CHANGELOG.md for the version history (current: v0.1.0).
 
    FILE MAP (all sections are in this one file, top to bottom):
-     1. CONFIG        — every tunable number lives here
+     1. CONFIG        — every tunable number lives here (plus MODIFIERS, 1b)
      2. PALETTE       — the Atari-ish colors
      3. AUDIO         — tiny WebAudio bleep/bloop synth
      4. INPUT         — keyboard + click handling
@@ -37,7 +37,7 @@
    ============================================================================ */
 const CONFIG = {
   // Game version — bump with every change (see CHANGELOG.md).
-  version: "0.0.15",
+  version: "0.1.0",
 
   // Internal render resolution. The game is simulated and drawn at this
   // low resolution, then scaled up with crisp pixels for the retro look.
@@ -76,9 +76,18 @@ const CONFIG = {
   spawnMaxBase: 4.2,
   spawnShrinkPerLevel: 0.22,   // multiplied into both ends each level
 
-  // Levels
+  // Levels / sectors. Levels 1-10 are the campaign; after the octopus dies the
+  // counter keeps going as the endless Patrol (sector 11, 12, ...).
   levelLength: 1600,           // px of travel per level
-  maxLevel: 10,
+  maxLevel: 10,                // terrain stops getting hillier here (levels stay 1-10)
+
+  // Endless Patrol (sector 11+). Difficulty grows through density and variety,
+  // and these caps stop the numbers from running away.
+  scrollCap: 126,              // world scroll never exceeds this (px/sec)
+  spawnScaleFloor: 0.22,       // late-sector floor on the spawn-gap scale
+  fireScaleFloor: 0.38,        // late-sector floor on the enemy fire-gap scale
+  enemyBulletSpeedCap: 240,    // enemy shot speed ceiling
+  milestoneTime: 2.5,          // "MOON SAVED" freeze before the Patrol begins
 
   // Terrain: hills grow from "smooth" (level 1) to "wild" (level 10)
   groundBase: 0.80,            // baseline ground height, fraction of viewH
@@ -150,6 +159,30 @@ const CONFIG = {
   bossFireMax: 1.6,            // ... (max)
   bossBulletSpeed: 118,
   scorePerBossKill: 900,
+
+  // Patrol bosses: from sector 15 the same three creatures return every 5
+  // sectors (spider -> crab -> octopus). Each appearance is 25% tougher, and
+  // from the second visit the fight carries an elite trait.
+  patrolBossStart: 15,
+  patrolBossEvery: 5,
+  bossHpGrowth: 0.25,          // +25% hp per repeat appearance
+  bossFrenzyFireScale: 0.75,   // FRENZIED: aimed shots come this much faster
+  bossShieldRegen: 6,          // SHIELDED: seconds per hit point regained
+};
+
+/* ============================================================================
+   1b. SECTOR MODIFIERS — one per Patrol sector (11+), announced in the banner
+   and shown in the HUD. Values live here so each flavour reads in one place.
+   ============================================================================ */
+const MODIFIERS = {
+  meteor:   { name: "METEOR STORM", meteorGap: [1.2, 2.2], meteorMax: 4 },
+  bombers:  { name: "BOMBER WING",  bomberQuota: 4, dropGap: [0.6, 1.1] },
+  air:      { name: "AIR RAID",     airBias: 0.8, speedScale: 1.15 },
+  ground:   { name: "GROUND SWARM", groundBias: 0.8, speedScale: 1.15 },
+  gravity:  { name: "LOW GRAVITY",  jump: 260, gravity: 270 },
+  armored:  { name: "ARMORED",      hits: 2 },
+  blackout: { name: "BLACKOUT" },
+  fast:     { name: "FAST FORWARD", scrollScale: 1.25 },
 };
 
 /* ============================================================================
@@ -475,6 +508,10 @@ function spawnEnemy(type, worldOffset) {
   e.dead = false;
   e.myBullet = null;
   e.bob = Math.random() * Math.PI * 2;
+  // ARMORED rovers and saucers need two hits; set explicitly so a recycled
+  // pool object can't inherit a stale hp from a previous spawn.
+  const mod = Game.modifierDef();
+  const hits = (mod && mod.hits) || 1;
 
   if (type === "ground") {
     e.w = 24; e.h = 16;
@@ -483,11 +520,15 @@ function spawnEnemy(type, worldOffset) {
     e.fireTimer = rand(CONFIG.enemyFireMin, CONFIG.enemyFireMax) * 0.6; // first shot comes a bit quicker
     e.colorIdx = Game.roverCycle;                     // rotate through colorways
     Game.roverCycle = (Game.roverCycle + 1) % COLORS.roverVariants.length;
+    e.hp = e.maxHp = hits;
+    e.hitFlash = 0;
   } else if (type === "air") {
     e.w = 30; e.h = 15;
     e.x = CONFIG.viewW + 10;
     e.y = rand(40, CONFIG.viewH * 0.42);
     e.fireTimer = rand(CONFIG.enemyFireMin, CONFIG.enemyFireMax);
+    e.hp = e.maxHp = hits;
+    e.hitFlash = 0;
   } else { // "bomber" — big red saucer, drops bombs instead of firing dots
     e.w = 40; e.h = 18;
     e.x = CONFIG.viewW + 14;
@@ -503,16 +544,46 @@ function spawnEnemy(type, worldOffset) {
   return e;
 }
 
-// How many red bombers visit per level: 1 on L1, 2 on L2, 3 from L3 onward.
-function bombersPerLevel(level) {
-  return level === 1 ? 1 : level === 2 ? 2 : 3;
+// Base stats per creature. CONFIG.bosses pins them to the campaign sectors
+// 3/7/10; the Patrol reuses the same sprites and numbers.
+const BOSS_BASE = {
+  spider:  CONFIG.bosses[3],
+  crab:    CONFIG.bosses[7],
+  octopus: CONFIG.bosses[10],
+};
+
+// Which boss (if any) guards the end of a sector. Campaign sectors come
+// straight from CONFIG.bosses; every 5th sector from 15 rotates the trio, with
+// `occurrence` counting repeat visits (1 = the creature's first Patrol outing).
+function bossForSector(sector) {
+  const campaign = CONFIG.bosses[sector];
+  if (campaign) return { occurrence: 1, recurring: false, elite: "", ...campaign };
+  if (sector < CONFIG.patrolBossStart || sector % CONFIG.patrolBossEvery !== 0) return null;
+  const kind = ["spider", "crab", "octopus"][((sector / CONFIG.patrolBossEvery) - 3) % 3];
+  const base = BOSS_BASE[kind];
+  const occurrence = Math.floor((sector - CONFIG.patrolBossStart) / 15) + 1;
+  return {
+    kind,
+    name: base.name,
+    w: base.w,
+    h: base.h,
+    hover: base.hover,
+    heatOnly: !!base.heatOnly,
+    occurrence,
+    recurring: true,
+    // Repeat visits get harder every time: faster shots from the second,
+    // armour regen from the third.
+    frenzied: occurrence >= 2,
+    shielded: occurrence >= 3,
+    elite: occurrence >= 3 ? "FRENZIED + SHIELDED" : occurrence === 2 ? "FRENZIED" : "",
+  };
 }
 
-// Bosses: one creature guards the end of levels 3, 7 and 10. It slides in from
-// the right and the level cannot advance until it dies. Called from update()
-// on the frame the finish line is reached.
-function spawnBoss(level) {
-  const cfg = CONFIG.bosses[level];
+// Bosses: one creature guards the end of levels 3, 7 and 10, and again at
+// intervals through the Patrol. It slides in from the right and the sector
+// cannot advance until it dies. Called from update() at the finish line.
+function spawnBoss(sector) {
+  const cfg = bossForSector(sector);
   const e = enemyPool.get();
   e.type = "boss";
   e.bossKind = cfg.kind;
@@ -531,19 +602,26 @@ function spawnBoss(level) {
   e.hitFlash = 0;
   e.colorIdx = 0;
   e.dead = false;
-  // 6x a red ship's 5-10 hits, except the octopus: 20 heat-seeker hits only.
-  e.hp = e.maxHp = e.heatOnly
+  // Campaign: 6x a red ship's 5-10 hits (30-60), except the octopus which
+  // takes 20 heat-seeker hits. Patrol repeats add 25% hp per appearance.
+  const baseHp = e.heatOnly
     ? CONFIG.octopusHeatHits
     : CONFIG.bossHpFactor * (CONFIG.bossHpBase + Math.floor(rand(0, 6)));
+  e.hp = e.maxHp = Math.round(baseHp * (1 + CONFIG.bossHpGrowth * (cfg.occurrence - 1)));
+  e.frenzied = !!cfg.frenzied;
+  e.shielded = !!cfg.shielded;
+  e.elite = cfg.elite;
+  e.regenTimer = CONFIG.bossShieldRegen;
   enemies.push(e);
   Game.bossActive = true;
   Game.bossDefeated = false;
   Game.banner = cfg.name + " ATTACKS!";
   Game.bannerTimer = 2;
   AudioSys.bossAlarm();
-  // The octopus can only be hurt by heat seekers. Front the price if the
-  // player has none and can't afford them, so the final fight can't deadlock.
-  if (e.heatOnly && Jeep.heatSeekers === 0 && Game.score < CONFIG.priceHeatSeekers) {
+  // The octopus can only be hurt by heat seekers. Front the price the first
+  // time it appears so the campaign finale can't deadlock — later octopuses
+  // rely on the player's own planning.
+  if (e.heatOnly && !Game.cleared && Jeep.heatSeekers === 0 && Game.score < CONFIG.priceHeatSeekers) {
     Game.score = CONFIG.priceHeatSeekers;
     Game.bossHintTimer = 4;
   }
@@ -561,6 +639,7 @@ function damageBoss(e, fromHeat, hx, hy) {
   }
   e.hp--;
   e.hitFlash = 0.1;
+  e.regenTimer = CONFIG.bossShieldRegen;   // a hit restarts the SHIELDED clock
   AudioSys.bossHit();
   if (e.hp > 0) return;
 
@@ -569,8 +648,10 @@ function damageBoss(e, fromHeat, hx, hy) {
   Game.shake = 0.8;
   Game.score += CONFIG.scorePerBossKill;
   Game.bossActive = false;
-  if (Game.level >= CONFIG.maxLevel) {
-    Game.victory();
+  // The campaign octopus is the milestone, not the end: MOON SAVED, then the
+  // Patrol continues. Every other boss just opens the next sector.
+  if (e.heatOnly && !Game.cleared) {
+    Game.milestone();
   } else {
     Game.bossDefeated = true;
     Game.nextLevel();
@@ -656,13 +737,20 @@ function hash1(n) {
    7. GAME STATE
    ============================================================================ */
 const Game = {
-  state: "title",        // "title" | "play" | "pause" | "shop" | "gameover" | "victory"
+  state: "title",        // "title" | "play" | "pause" | "shop" | "gameover"
   score: 0,              // CURRENCY — spendable in the buy menu
   hiScore: Number(localStorage.getItem("moonranger_hi") || 0),
+  depth: Number(localStorage.getItem("moonranger_depth") || 0),   // best sector ever
+  clearedEver: localStorage.getItem("moonranger_cleared") === "1",
   shield: 0,             // shield charges (small +1 / large +3)
   shopFlash: 0,          // "not enough currency" warning timer
   roverCycle: 0,         // next ground-rover colorway index
-  level: 1,
+  sector: 1,             // unbounded run counter (levels 1-10, then Patrol)
+  cleared: false,        // this run has beaten the campaign octopus
+  patrolAnnounced: false,// "PATROL BEGINS" banner has been shown this run
+  winFlash: 0,           // seconds left on the MOON SAVED overlay
+  modifier: null,        // active sector modifier id (see MODIFIERS), or null
+  recentMods: [],        // last few modifier ids, so none repeat back-to-back
   distance: 0,           // px travelled this run
   worldOffset: 0,        // total world x scrolled
   spawnTimer: 2.5,
@@ -677,10 +765,120 @@ const Game = {
   bossDefeated: false,   // this level's boss has been destroyed
   bossHintTimer: 0,      // "heat seekers only" flash after a wasted hit
 
+  /* -- Sector helpers. Everything past sector 10 reads these instead of doing
+        its own arithmetic, so the curve lives in one place. -- */
+
+  // "LEVEL 5" inside the campaign, "SECTOR 23" out in the Patrol.
+  sectorLabel() {
+    return (this.sector <= CONFIG.maxLevel ? "LEVEL " : "SECTOR ") + this.sector;
+  },
+
+  // Terrain is a visual ramp that tops out at sector 10; sectors keep counting.
+  terrainLevel() { return Math.min(this.sector, CONFIG.maxLevel); },
+
+  /* -- Sector modifiers. One per Patrol sector; never on a boss sector, and
+        no flavour repeats within three sectors. -- */
+
+  modifierDef() { return this.modifier ? MODIFIERS[this.modifier] : null; },
+  hasModifier(id) { return this.modifier === id; },
+  isBossSector() { return !!bossForSector(this.sector); },
+
+  pickModifier() {
+    this.modifier = null;
+    if (this.sector <= CONFIG.maxLevel || this.isBossSector()) return;
+    const all = Object.keys(MODIFIERS);
+    let pool = all.filter((id) => this.recentMods.indexOf(id) === -1);
+    // Ease into the Patrol: the first endless sector only shifts the look or
+    // the jump arc, never the enemy mix.
+    if (this.sector === CONFIG.maxLevel + 1) {
+      pool = ["blackout", "gravity"].filter((id) => this.recentMods.indexOf(id) === -1);
+    }
+    if (!pool.length) pool = all;
+    this.modifier = pool[Math.floor(Math.random() * pool.length)];
+    this.recentMods.push(this.modifier);
+    if (this.recentMods.length > 3) this.recentMods.shift();
+  },
+
+  // World scroll (px/sec), capped so the endgame never outruns the driver.
+  scrollSpeed() {
+    const s = Math.min(
+      CONFIG.scrollSpeed + CONFIG.scrollSpeedPerLevel * (this.sector - 1),
+      CONFIG.scrollCap
+    );
+    const m = this.modifierDef();
+    return m && m.scrollScale ? Math.round(s * m.scrollScale) : s;
+  },
+
+  // Jump arc — LOW GRAVITY floats the jeep higher and drops it slower.
+  jumpPower() {
+    const m = this.modifierDef();
+    return (m && m.jump) || CONFIG.jumpPower;
+  },
+  gravity() {
+    const m = this.modifierDef();
+    return (m && m.gravity) || CONFIG.gravity;
+  },
+
+  // Which enemy the spawner rolls; AIR RAID / GROUND SWARM bias the mix.
+  spawnType() {
+    const m = this.modifierDef();
+    if (m && m.airBias)    return Math.random() < m.airBias    ? "air" : "ground";
+    if (m && m.groundBias) return Math.random() < m.groundBias ? "ground" : "air";
+    if (this.sector === 1 && Math.random() < 0.65) return "ground";
+    return Math.random() < 0.5 ? "ground" : "air";
+  },
+
+  // Seconds between a bomber's bomb drops.
+  bomberDropGap() {
+    const m = this.modifierDef();
+    return (m && m.dropGap) || [CONFIG.bomberDropMin, CONFIG.bomberDropMax];
+  },
+
+  // Enemies allowed on screen at once: 4, then 5 from sector 15, 6 from 25.
+  enemyCap() {
+    if (this.sector >= 25) return 6;
+    if (this.sector >= 15) return 5;
+    return CONFIG.maxEnemies;
+  },
+
+  // Multiplier on the spawn gap: tightens to 0.35 by sector 4, then keeps
+  // easing down to 0.22 across the Patrol.
+  spawnScale() {
+    if (this.sector <= CONFIG.maxLevel) {
+      return Math.max(0.35, 1 - CONFIG.spawnShrinkPerLevel * (this.sector - 1));
+    }
+    return Math.max(CONFIG.spawnScaleFloor, 0.35 - 0.01 * (this.sector - CONFIG.maxLevel));
+  },
+
+  // Multiplier on the enemy fire gap. Burns down to 0.38, never further.
+  fireScale() {
+    return Math.max(CONFIG.fireScaleFloor, 1 - 0.05 * (this.sector - 1));
+  },
+
+  // Enemy shot speed: +9 px/sec per sector, ceiling 240.
+  foeBulletSpeed() {
+    const s = CONFIG.enemyBulletSpeed + CONFIG.enemyBulletSpeedPerLevel * (this.sector - 1);
+    return Math.min(s, CONFIG.enemyBulletSpeedCap);
+  },
+
+  // Red bomber visits per sector: 1 / 2 / 3 through the campaign, then 4 and 5.
+  bomberQuota() {
+    let quota = this.sector >= 30 ? 5 : this.sector >= 20 ? 4 : this.sector === 1 ? 1 : this.sector === 2 ? 2 : 3;
+    const m = this.modifierDef();
+    if (m && m.bomberQuota) quota = Math.max(quota, m.bomberQuota);
+    return quota;
+  },
+
+  // Remember the deepest sector ever reached (shown on the title screen).
+  saveDepth() {
+    if (this.sector <= this.depth) return;
+    this.depth = this.sector;
+    localStorage.setItem("moonranger_depth", String(this.depth));
+  },
+
   // Seconds one level takes at the current scroll speed.
   computeLevelDuration() {
-    const scroll = CONFIG.scrollSpeed + CONFIG.scrollSpeedPerLevel * (this.level - 1);
-    return CONFIG.levelLength / scroll;
+    return CONFIG.levelLength / this.scrollSpeed();
   },
 
   // Spread this level's red ships evenly across the whole level (with jitter):
@@ -689,7 +887,7 @@ const Game = {
     this.levelDuration = this.computeLevelDuration();
     this.levelElapsed = 0;
     this.bomberIdx = 0;
-    const quota = bombersPerLevel(this.level);
+    const quota = this.bomberQuota();
     this.bomberSchedule = [];
     for (let i = 0; i < quota; i++) {
       this.bomberSchedule.push(this.levelDuration * ((i + 0.6) / quota) * rand(0.9, 1.1));
@@ -704,7 +902,12 @@ const Game = {
   start() {
     this.state = "play";
     this.score = 0;
-    this.level = 1;
+    this.sector = 1;
+    this.cleared = false;
+    this.patrolAnnounced = false;
+    this.winFlash = 0;
+    this.modifier = null;
+    this.recentMods = [];
     this.distance = 0;
     this.worldOffset = 0;
     this.spawnTimer = 2.5;
@@ -714,7 +917,7 @@ const Game = {
     this.bannerTimer = 2;
     this.shake = 0;
     this.flash = 0;
-    Terrain.setLevel(1);
+    Terrain.setLevel(this.terrainLevel());
     Jeep.reset();
     this.shield = 0;
     this.shopFlash = 0;
@@ -734,24 +937,33 @@ const Game = {
 
   gameOver() {
     this.state = "gameover";
+    this.saveDepth();
     this.hiScore = Math.max(this.hiScore, Math.floor(this.score));
     localStorage.setItem("moonranger_hi", String(this.hiScore));
     clearPresses();
     AudioSys.gameOver();
   },
 
-  // The octopus is dead and there is no level 11: end the run in triumph.
-  victory() {
-    this.state = "victory";
-    this.hiScore = Math.max(this.hiScore, Math.floor(this.score));
-    localStorage.setItem("moonranger_hi", String(this.hiScore));
+  // The campaign octopus is dead, but the run is not over: hold a short
+  // MOON SAVED freeze (update() returns early while winFlash runs), then roll
+  // into the endless Patrol at sector 11.
+  milestone() {
+    this.cleared = true;
+    if (!this.clearedEver) {
+      this.clearedEver = true;
+      localStorage.setItem("moonranger_cleared", "1");
+    }
+    this.bossDefeated = true;   // don't respawn the octopus behind the overlay
+    this.winFlash = CONFIG.milestoneTime;
+    this.saveDepth();
     clearPresses();
     AudioSys.victory();
   },
 
   nextLevel() {
-    this.level = Math.min(this.level + 1, CONFIG.maxLevel);
-    Terrain.setLevel(this.level);
+    this.sector++;                    // no cap — the Patrol is endless
+    this.pickModifier();              // before scheduleBombers: it reads scroll
+    Terrain.setLevel(this.terrainLevel());
     this.bossActive = false;
     this.bossDefeated = false;
     this.bossHintTimer = 0;
@@ -761,8 +973,17 @@ const Game = {
       if (e.type === "bomber" && !e.retreating) e.retreating = true;
     }
     this.scheduleBombers(); // fresh, evenly-spread bomber quota
-    this.banner = this.level >= CONFIG.maxLevel ? "LEVEL 10 — MAX HILLS!" : "LEVEL " + this.level;
+    const modName = this.modifier ? " - " + MODIFIERS[this.modifier].name : "";
+    if (!this.patrolAnnounced && this.sector > CONFIG.maxLevel) {
+      this.patrolAnnounced = true;
+      this.banner = "PATROL BEGINS" + modName;
+    } else {
+      this.banner = this.sector === CONFIG.maxLevel
+        ? "LEVEL 10 — MAX HILLS!"
+        : this.sectorLabel() + modName;
+    }
     this.bannerTimer = 2;
+    this.saveDepth();
     AudioSys.levelUp();
   },
 };
@@ -804,7 +1025,7 @@ function update(dt) {
     return;
   }
 
-  if (Game.state === "gameover" || Game.state === "victory") {
+  if (Game.state === "gameover") {
     updateSparks(dt);
     if (Game.shake > 0) Game.shake -= dt;
     if (Game.flash > 0) Game.flash -= dt;
@@ -834,6 +1055,18 @@ function update(dt) {
   }
   if (Game.state === "pause") { clicked = false; return; }
 
+  /* -- MOON SAVED freeze: the world holds still for a moment after the
+        campaign octopus dies, then the Patrol begins at sector 11. -- */
+  if (Game.winFlash > 0) {
+    Game.winFlash -= dt;
+    if (Game.winFlash <= 0) {
+      clearPresses();
+      Game.nextLevel();
+    }
+    clicked = false;
+    return;
+  }
+
   // Open the buy menu from play.
   if (consumePress("KeyB")) {
     Game.state = "shop";
@@ -844,24 +1077,21 @@ function update(dt) {
 
   /* ---- PLAY ---- */
 
-  const levelT = Game.level - 1;
   // The world slows right down while a boss is on screen — the fight is an arena.
-  const scroll = (CONFIG.scrollSpeed + CONFIG.scrollSpeedPerLevel * levelT)
-    * (Game.bossActive ? CONFIG.bossScrollFactor : 1);
+  const scroll = Game.scrollSpeed() * (Game.bossActive ? CONFIG.bossScrollFactor : 1);
 
   // World scrolls; jeep x stays put.
   Game.worldOffset += scroll * dt;
   Game.distance += scroll * dt;
   Game.score += scroll * dt * CONFIG.scorePerPixel;
 
-  // Level progression by distance travelled. Levels 3, 7 and 10 hold their
-  // finish line open until their boss dies; level 10 has no next level at all,
-  // so beating the octopus wins the run (see damageBoss).
-  const levelEnd = Game.distance >= Game.level * CONFIG.levelLength;
-  if (levelEnd && CONFIG.bosses[Game.level] && !Game.bossDefeated) {
-    Game.distance = Game.level * CONFIG.levelLength;   // hold the finish line
-    if (!Game.bossActive) spawnBoss(Game.level);
-  } else if (levelEnd && Game.level < CONFIG.maxLevel) {
+  // Sector progression by distance travelled. Levels 3, 7 and 10 hold their
+  // finish line open until their boss dies; there is no upper bound any more.
+  const levelEnd = Game.distance >= Game.sector * CONFIG.levelLength;
+  if (levelEnd && bossForSector(Game.sector) && !Game.bossDefeated) {
+    Game.distance = Game.sector * CONFIG.levelLength;   // hold the finish line
+    if (!Game.bossActive) spawnBoss(Game.sector);
+  } else if (levelEnd) {
     Game.nextLevel();
   }
 
@@ -876,14 +1106,14 @@ function update(dt) {
 
   if (consumePress("ArrowUp") || consumePress("KeyW")) {
     if (!Jeep.airborne) {
-      Jeep.vy = -CONFIG.jumpPower;
+      Jeep.vy = -Game.jumpPower();
       Jeep.airborne = true;
       AudioSys.jump();
     }
   }
 
   if (Jeep.airborne) {
-    Jeep.vy += CONFIG.gravity * dt;
+    Jeep.vy += Game.gravity() * dt;
     Jeep.y += Jeep.vy * dt;
     if (Jeep.y >= groundHere - CONFIG.jeepH) {
       Jeep.y = groundHere - CONFIG.jeepH;
@@ -948,12 +1178,9 @@ function update(dt) {
 
   /* -- Enemy spawning -- */
   Game.spawnTimer -= dt;
-  if (Game.spawnTimer <= 0 && enemies.length < CONFIG.maxEnemies && !Game.bossActive) {
-    const shrink = Math.max(0.35, 1 - CONFIG.spawnShrinkPerLevel * levelT);
-    Game.spawnTimer = rand(CONFIG.spawnMinBase, CONFIG.spawnMaxBase) * shrink;
-    // Level 1 is gentle: ground enemies only for the first stretch.
-    const type = (Game.level === 1 && Math.random() < 0.65) || Math.random() < 0.5 ? "ground" : "air";
-    spawnEnemy(type, Game.worldOffset);
+  if (Game.spawnTimer <= 0 && enemies.length < Game.enemyCap() && !Game.bossActive) {
+    Game.spawnTimer = rand(CONFIG.spawnMinBase, CONFIG.spawnMaxBase) * Game.spawnScale();
+    spawnEnemy(Game.spawnType(), Game.worldOffset);
   }
 
   /* -- Red bomber quota (1 on L1, 2 on L2, 3 from L3) --
@@ -973,27 +1200,36 @@ function update(dt) {
   }
 
   /* -- Meteors (from level 3 onward; they keep falling during boss fights) -- */
-  if (Game.level >= 3) {
+  if (Game.sector >= 3) {
     Game.meteorTimer -= dt;
     if (Game.meteorTimer <= 0) {
-      Game.meteorTimer = Game.bossActive
-        ? rand(CONFIG.bossMeteorMinGap, CONFIG.bossMeteorMaxGap)
-        : rand(CONFIG.meteorMinGap, CONFIG.meteorMaxGap);
-      // In a boss fight they slam down between the jeep and the creature, so
-      // the rolling rock is a jumpable hazard without covering the boss.
-      spawnMeteor(Game.bossActive ? 0.30 : 0.55, Game.bossActive ? 0.50 : 0.85);
+      const mod = Game.modifierDef();
+      const gap = Game.bossActive
+        ? [CONFIG.bossMeteorMinGap, CONFIG.bossMeteorMaxGap]
+        : (mod && mod.meteorGap) || [CONFIG.meteorMinGap, CONFIG.meteorMaxGap];
+      Game.meteorTimer = rand(gap[0], gap[1]);
+      // METEOR STORM keeps the sky busy but caps how many rocks are live.
+      if (!mod || !mod.meteorMax || meteors.length < mod.meteorMax) {
+        // In a boss fight they slam down between the jeep and the creature, so
+        // the rolling rock is a jumpable hazard without covering the boss.
+        spawnMeteor(Game.bossActive ? 0.30 : 0.55, Game.bossActive ? 0.50 : 0.85);
+      }
     }
   }
 
   /* -- Enemies -- */
-  const foeBulletSpeed = CONFIG.enemyBulletSpeed + CONFIG.enemyBulletSpeedPerLevel * levelT;
-  const fireScale = Math.max(0.5, 1 - 0.05 * levelT);
+  const foeBulletSpeed = Game.foeBulletSpeed();
+  const fireScale = Game.fireScale();
+  // AIR RAID / GROUND SWARM also wind their side of the mix up 15%.
+  const modDef = Game.modifierDef();
+  const groundScale = modDef && modDef.groundBias ? modDef.speedScale : 1;
+  const airScale = modDef && modDef.airBias ? modDef.speedScale : 1;
 
   for (const e of enemies) {
     if (e.hitFlash > 0) e.hitFlash -= dt;
     if (e.type === "ground") {
       // Ground enemies ride the terrain, drifting left against the scroll.
-      e.x -= (scroll + CONFIG.groundEnemySpeed) * dt;
+      e.x -= (scroll + CONFIG.groundEnemySpeed * groundScale) * dt;
       const wy = Terrain.groundY(Game.worldOffset + e.x + e.w / 2);
       e.y = wy - e.h;
     } else if (e.type === "bomber") {
@@ -1005,7 +1241,8 @@ function update(dt) {
       if (!e.retreating) {
         e.dropTimer -= dt;
         if (e.dropTimer <= 0 && e.x < CONFIG.viewW - 20 && e.x > CONFIG.viewW * 0.2) {
-          e.dropTimer = rand(CONFIG.bomberDropMin, CONFIG.bomberDropMax);
+          const gap = Game.bomberDropGap();
+          e.dropTimer = rand(gap[0], gap[1]);
           spawnBomb(e.x + e.w / 2, e.y + e.h);
         }
       }
@@ -1020,11 +1257,22 @@ function update(dt) {
         e.bob += dt * 1.5;
         e.x = e.baseX + Math.sin(e.bob * 0.9) * 9;
         e.y = e.baseY + Math.sin(e.bob) * 5;
+        // SHIELDED: slowly regains a hit point; any damage restarts the clock
+        // (see damageBoss). Only while fully materialised, never mid-entry.
+        if (e.shielded && e.hp < e.maxHp) {
+          e.regenTimer -= dt;
+          if (e.regenTimer <= 0) {
+            e.regenTimer = CONFIG.bossShieldRegen;
+            e.hp++;
+            tinySpark(e.x + e.w / 2, e.y + e.h / 2);
+            AudioSys.beep(260, 560, 0.14, 0.06);
+          }
+        }
       }
     } else {
       // Air enemies hold altitude with a gentle bob.
       e.bob += dt * 2.4;
-      e.x -= CONFIG.airEnemySpeed * dt;
+      e.x -= CONFIG.airEnemySpeed * airScale * dt;
       e.y += Math.sin(e.bob) * 12 * dt;
     }
 
@@ -1038,7 +1286,7 @@ function update(dt) {
       e.fireTimer -= dt;
       if (e.fireTimer <= 0) {
         e.fireTimer = isBoss
-          ? rand(CONFIG.bossFireMin, CONFIG.bossFireMax)
+          ? rand(CONFIG.bossFireMin, CONFIG.bossFireMax) * (e.frenzied ? CONFIG.bossFrenzyFireScale : 1)
           : rand(CONFIG.enemyFireMin, CONFIG.enemyFireMax) * fireScale;
         // Aim a dot straight at the jeep's current position.
         const sx = e.x + e.w / 2, sy = e.y + e.h / 2;
@@ -1096,9 +1344,16 @@ function update(dt) {
               Game.score += CONFIG.scorePerBomberKill;
             }
           } else {
-            e.dead = true;
-            explode(e.x + e.w / 2, e.y + e.h / 2, enemyMainColor(e));
-            Game.score += e.type === "ground" ? CONFIG.scorePerGroundKill : CONFIG.scorePerAirKill;
+            // Rovers and saucers die in one hit, unless ARMORED is running.
+            e.hp--;
+            if (e.hp > 0) {
+              e.hitFlash = 0.09;
+              tinySpark(b.x, b.y);
+            } else {
+              e.dead = true;
+              explode(e.x + e.w / 2, e.y + e.h / 2, enemyMainColor(e));
+              Game.score += e.type === "ground" ? CONFIG.scorePerGroundKill : CONFIG.scorePerAirKill;
+            }
           }
           break;
         }
@@ -1231,9 +1486,15 @@ function update(dt) {
             explode(m.x, m.y, COLORS.flame, 8);
           }
         } else {
-          e.dead = true;
-          explode(e.x + e.w / 2, e.y + e.h / 2, enemyMainColor(e));
-          Game.score += e.type === "ground" ? CONFIG.scorePerGroundKill : CONFIG.scorePerAirKill;
+          e.hp--;
+          if (e.hp > 0) {
+            e.hitFlash = 0.09;
+            tinySpark(m.x, m.y);
+          } else {
+            e.dead = true;
+            explode(e.x + e.w / 2, e.y + e.h / 2, enemyMainColor(e));
+            Game.score += e.type === "ground" ? CONFIG.scorePerGroundKill : CONFIG.scorePerAirKill;
+          }
         }
         break;
       }
@@ -1311,7 +1572,7 @@ const FONT = {
   "Q": [7,5,5,7,1], "R": [7,5,6,5,5], "S": [3,4,2,1,6], "T": [7,2,2,2,2],
   "U": [5,5,5,5,7], "V": [5,5,5,5,2], "W": [5,5,7,7,5], "X": [5,5,2,5,5],
   "Y": [5,5,2,2,2], "Z": [7,1,2,4,7],
-  " ": [0,0,0,0,0], "-": [0,0,7,0,0], "!": [2,2,2,0,2], ".": [0,0,0,0,2],
+  " ": [0,0,0,0,0], "-": [0,0,7,0,0], "+": [0,2,7,2,0], "!": [2,2,2,0,2], ".": [0,0,0,0,2],
   ":": [0,2,0,2,0], "/": [1,1,2,4,4], ">": [4,2,1,2,4], "<": [1,2,4,2,1],
 };
 
@@ -1355,13 +1616,15 @@ function render() {
   ctx.fillStyle = COLORS.sky;
   ctx.fillRect(-8, -8, CONFIG.viewW + 16, CONFIG.viewH + 16);
 
-  /* Stars (parallax with the world) */
-  for (const st of stars) {
-    const speed = st.near ? 0.25 : 0.1;
-    let sx = (st.x - Game.worldOffset * speed) % CONFIG.viewW;
-    if (sx < 0) sx += CONFIG.viewW;
-    ctx.fillStyle = st.near ? COLORS.starNear : COLORS.starFar;
-    ctx.fillRect(Math.round(sx), Math.round(st.y), st.near ? 2 : 1, st.near ? 2 : 1);
+  /* Stars (parallax with the world). BLACKOUT pulls them out of the sky. */
+  if (!Game.hasModifier("blackout")) {
+    for (const st of stars) {
+      const speed = st.near ? 0.25 : 0.1;
+      let sx = (st.x - Game.worldOffset * speed) % CONFIG.viewW;
+      if (sx < 0) sx += CONFIG.viewW;
+      ctx.fillStyle = st.near ? COLORS.starNear : COLORS.starFar;
+      ctx.fillRect(Math.round(sx), Math.round(st.y), st.near ? 2 : 1, st.near ? 2 : 1);
+    }
   }
 
   /* Terrain */
@@ -1375,10 +1638,13 @@ function render() {
   ctx.closePath();
   ctx.fill();
 
-  // Bright rim along the surface — classic Atari ground highlight.
-  ctx.fillStyle = COLORS.groundRim;
-  for (let sx = -8; sx <= CONFIG.viewW + 8; sx += 2) {
-    ctx.fillRect(sx, Math.round(Terrain.groundY(Game.worldOffset + sx)), 2, 2);
+  // Bright rim along the surface — classic Atari ground highlight. BLACKOUT
+  // drops the rim too, so the horizon loses its outline.
+  if (!Game.hasModifier("blackout")) {
+    ctx.fillStyle = COLORS.groundRim;
+    for (let sx = -8; sx <= CONFIG.viewW + 8; sx += 2) {
+      ctx.fillRect(sx, Math.round(Terrain.groundY(Game.worldOffset + sx)), 2, 2);
+    }
   }
 
   /* Craters: hashed from the world position, so they scroll with the ground */
@@ -1442,9 +1708,14 @@ function render() {
   else if (Game.state === "pause") drawPause();
   else if (Game.state === "shop") drawShop();
   else if (Game.state === "gameover") drawGameOver();
-  else if (Game.state === "victory") drawVictory();
+  else if (Game.winFlash > 0) drawMilestone();
   else if (Game.bannerTimer > 0) {
     const pulse = Math.floor(Game.bannerTimer * 6) % 2 === 0;
+    // Patrol banners carry a modifier name, so they are long enough to land on
+    // an enemy: sit them on a dark band instead of bare sky.
+    const bw = textWidth(Game.banner, 2) + 12;
+    ctx.fillStyle = "rgba(0,0,10,0.62)";
+    ctx.fillRect(Math.round((CONFIG.viewW - bw) / 2), 80, Math.round(bw), 16);
     drawTextCentered(Game.banner, 84, 2, pulse ? COLORS.hud : COLORS.hudDim);
   }
 
@@ -1526,6 +1797,10 @@ function drawJeep() {
 
 function drawEnemy(e) {
   const x = Math.round(e.x), y = Math.round(e.y);
+  // Non-fatal hits flash the sprite; BLACKOUT brightens every enemy so the
+  // silhouettes still read against a starless sky.
+  if (e.hitFlash > 0) ctx.filter = "brightness(2)";
+  else if (Game.hasModifier("blackout")) ctx.filter = "brightness(1.35)";
   if (e.type === "ground") {
     // Retro-futuristic wedge rover: pointed nose forward (left, toward the
     // jeep), bubble canopy, tail fin, side stripe. Colorway cycles per spawn.
@@ -1609,6 +1884,7 @@ function drawEnemy(e) {
       if (i === blink) ctx.fillRect(x + 4 + i * 7, y + 7, 2, 2);
     }
   }
+  ctx.filter = "none";
 }
 
 /* -- Boss creature art. All three are drawn in blocks at the 480x270 buffer's
@@ -1922,8 +2198,12 @@ function drawHUD() {
     px += textWidth(s, 1) + 5;
   }
 
-  const lvl = "LEVEL " + Game.level;
+  const lvl = Game.sectorLabel();
   drawText(lvl, CONFIG.viewW - textWidth(lvl, 1) - 6, 6, 1, COLORS.hud);
+  // Active sector modifier, dim and out of the way under the power-up row.
+  if (Game.modifier) {
+    drawText(MODIFIERS[Game.modifier].name, 6, 22, 1, COLORS.hudDim);
+  }
   if (AudioSys.muted) drawText("MUTED", CONFIG.viewW - textWidth("MUTED", 1) - 6, 14, 1, COLORS.hudDim);
 
   // Boss health: name over a bar, plus the octopus' immunity hint. Only while
@@ -1933,7 +2213,7 @@ function drawHUD() {
     : null;
   if (boss) {
     const bw = 160, bx = Math.round((CONFIG.viewW - bw) / 2), by = 26;
-    drawTextCentered(boss.name, by - 9, 1, enemyMainColor(boss));
+    drawTextCentered(boss.name + (boss.elite ? " - " + boss.elite : ""), by - 9, 1, enemyMainColor(boss));
     ctx.strokeStyle = COLORS.hudDim;
     ctx.lineWidth = 1;
     ctx.strokeRect(bx + 0.5, by + 0.5, bw, 5);
@@ -1975,7 +2255,9 @@ function drawTitle() {
   if (Math.floor(performance.now() / 400) % 2 === 0) {
     drawTextCentered("PRESS SPACE TO START", 172, 1, COLORS.groundRim);
   }
-  if (Game.hiScore > 0) drawTextCentered("HI-SCORE " + Game.hiScore, 196, 1, COLORS.bulletFoe);
+  if (Game.hiScore > 0) drawTextCentered("HI-SCORE " + Game.hiScore, 184, 1, COLORS.bulletFoe);
+  if (Game.depth > 0) drawTextCentered("DEEPEST SECTOR " + Game.depth, 196, 1, COLORS.bulletYou);
+  if (Game.clearedEver) drawTextCentered("MOON SAVED", 208, 1, COLORS.jeepBody);
   drawText("V" + CONFIG.version, 4, CONFIG.viewH - 9, 1, COLORS.hudDim);
 }
 
@@ -2011,20 +2293,20 @@ function drawGameOver() {
   drawTextCentered("GAME OVER", 90, 3, COLORS.bomber);
   drawTextCentered("CURRENCY " + Math.floor(Game.score), 134, 1, COLORS.hud);
   drawTextCentered("HI-SCORE " + Game.hiScore, 148, 1, COLORS.bulletFoe);
-  drawTextCentered("REACHED LEVEL " + Game.level, 166, 1, COLORS.hudDim);
+  drawTextCentered("REACHED " + Game.sectorLabel(), 166, 1, COLORS.hudDim);
   if (Math.floor(performance.now() / 400) % 2 === 0) {
     drawTextCentered("PRESS SPACE TO RETRY", 192, 1, COLORS.groundRim);
   }
 }
 
-function drawVictory() {
+// Campaign milestone: the run continues, so this is a banner, not an ending.
+function drawMilestone() {
   shade();
   drawTextCentered("MOON SAVED", 78, 3, COLORS.jeepBody);
   drawTextCentered("OCTOPUS DESTROYED", 118, 1, COLORS.hud);
   drawTextCentered("CURRENCY " + Math.floor(Game.score), 140, 1, COLORS.bulletYou);
-  drawTextCentered("HI-SCORE " + Game.hiScore, 152, 1, COLORS.bulletFoe);
   if (Math.floor(performance.now() / 400) % 2 === 0) {
-    drawTextCentered("PRESS SPACE TO PLAY AGAIN", 178, 1, COLORS.groundRim);
+    drawTextCentered("PATROL BEGINS...", 164, 1, COLORS.groundRim);
   }
 }
 
@@ -2088,7 +2370,14 @@ fitCanvas();
 Jeep.y = Terrain.groundY(Jeep.x) - CONFIG.jeepH;
 
 // Debug/testing handle (harmless in production): inspect state from devtools.
-window.GAME = { Game, Jeep, Terrain, CONFIG, get enemies() { return enemies; }, get bullets() { return bullets; }, get meteors() { return meteors; } };
+window.GAME = {
+  Game, Jeep, Terrain, CONFIG, MODIFIERS,
+  spawnEnemy, spawnBullet, spawnMeteor, spawnBoss, bossForSector, damageBoss,
+  get enemies() { return enemies; },
+  get bullets() { return bullets; },
+  get meteors() { return meteors; },
+  get missiles() { return missiles; },
+};
 
 const STEP = 1 / 60;
 let acc = 0, last = performance.now();

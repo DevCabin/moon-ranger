@@ -1,8 +1,12 @@
 # Next Steps — Endless Patrol (post-level-10)
 
-**Status:** plan only, nothing implemented yet.
-**Target version:** `0.1.0` (new mode, not a patch).
-**Current build:** `0.0.15` — 10 levels, bosses at 3/7/10, Octopus ends the run.
+**Status:** steps 1–5 and the docs/version pass are implemented and released as
+  `0.1.0`. Boss ordnance (6) and shield price scaling (7) are still to do; the
+  octopus heat-economy fix landed early, in step 5.
+**Target version:** `0.1.0` (new mode, not a patch). `CONFIG.version` is still
+  `0.0.15`; it gets bumped in step 8.
+**Build before this work:** `0.0.15` — 10 levels, bosses at 3/7/10, Octopus
+  ended the run.
 
 This document is self-contained: it records the current constraints, the agreed
 design, the new boss-ordnance requirement, the exact numbers we intend to start
@@ -342,19 +346,50 @@ call it on the first Octopus anymore.
 
 Each step should be playable before moving on.
 
-1. **Counters & persistence** — rename `level` → `sector`, terrain clamp,
-   `moonranger_depth` / `moonranger_cleared`, title + game-over display.
-2. **Difficulty helpers** — sector-based scroll/spawn/fire/cap/bomber values.
-3. **Victory → continue** — milestone overlay, sector 11 entry. (Game is endless
-   now, even before modifiers.)
-4. **Modifiers** — table, selection, banner + HUD, hooks in spawn/meteor/scroll/
-   gravity/armor/blackout.
-5. **Boss schedule** — recurring bosses every 5, HP scaling, elite traits.
+1. ✅ **Counters & persistence** — `level` → `sector` (no other `Game.level`
+   remains), terrain via `terrainLevel()`, `moonranger_depth` /
+   `moonranger_cleared`, title + game-over display, `sectorLabel()`.
+2. ✅ **Difficulty helpers** — `scrollSpeed()`, `enemyCap()`, `spawnScale()`,
+   `fireScale()`, `foeBulletSpeed()`, `bomberQuota()` on `Game`; the update loop
+   calls these and no longer does per-level arithmetic. Caps live in `CONFIG`
+   (`scrollCap`, `spawnScaleFloor`, `fireScaleFloor`, `enemyBulletSpeedCap`).
+3. ✅ **Victory → continue** — `Game.milestone()` sets `cleared`, persists
+   `moonranger_cleared`, and starts a `winFlash` freeze (`CONFIG.milestoneTime`);
+   `update()` returns early while it runs and then calls `nextLevel()`, which
+   lands on sector 11 with `PATROL BEGINS`. `Game.victory()` and
+   `drawVictory()` are gone. (Game is endless now, even before modifiers.)
+4. ✅ **Modifiers** — `MODIFIERS` table + `Game.pickModifier()`/
+   `modifierDef()`/`hasModifier()`; no repeats within three sectors, none on
+   campaign or boss sectors, sector 11 restricted to `blackout`/`gravity`.
+   Hooks: `spawnType()`, `scrollSpeed()`, `jumpPower()`, `gravity()`,
+   `bomberDropGap()`, `bomberQuota()`, meteor gap + live cap, ARMORED hp on
+   spawn plus the two hit paths, BLACKOUT render. Banner reads
+   `SECTOR 12 - METEOR STORM` on a dark band; HUD shows the name under the
+   power-up row. **Step 5 must teach `isBossSector()` about recurring bosses**
+   or boss sectors will pick up a modifier.
+5. ✅ **Boss schedule** — `bossForSector(sector)` resolves campaign sectors
+   from `CONFIG.bosses` and rotates spider → crab → octopus every 5 from 15
+   (`CONFIG.patrolBossStart/Every`), with `occurrence` = repeat visit. HP is
+   `round(base × (1 + 0.25 × (occurrence-1)))` (`CONFIG.bossHpGrowth`). Elite
+   traits: FRENZIED from the 2nd visit (fire gap ×0.75, `bossFrenzyFireScale`),
+   SHIELDED from the 3rd (regains 1 hp every `bossShieldRegen` = 6 s; any damage
+   resets the clock, which `damageBoss()` does). `isBossSector()` now asks
+   `bossForSector()`, so boss sectors never pick up a modifier. The elite tag
+   shows in the boss health-bar name, and `+` was added to the pixel font for
+   `FRENZIED + SHIELDED`.
+   **Deviation from 8.3:** the third appearance carries *both* traits rather
+   than Shielded alone — otherwise visit 3 would be easier than visit 2.
+   Also pulled forward from step 7: the octopus emergency top-up is gated on
+   `!Game.cleared`, because recurring octopuses would otherwise hand out 500
+   credits every time.
 6. **Boss ordnance** — `foeMissiles`, stages from section 8.2, draw + collision +
    shoot-down + audio.
-7. **Economy** — shield price scaling; Octopus heat-economy fix.
-8. **Docs & release** — README rules, CHANGELOG, developers.md (new section +
-   line refs), version `0.1.0`.
+7. **Economy** — shield price scaling. (The octopus heat-economy fix is already
+   in: the emergency top-up is gated on `!Game.cleared`.)
+8. ✅ **Docs & release** — README rules, CHANGELOG entry, `developers.md`
+   section 9 (sectors / modifiers / Patrol bosses), all 28 `game.js#L…` links
+   re-verified against the file, version `0.1.0` in `CONFIG`, the header, the
+   README and the CHANGELOG. Repeat for step 6 when it lands.
 
 Rough effort: 1.5–2 focused days. Steps 1–3 are the minimum shippable slice;
 5–6 are the bulk of the work.
@@ -363,8 +398,7 @@ Rough effort: 1.5–2 focused days. Steps 1–3 are the minimum shippable slice;
 
 ## 13. Test plan (manual, via `window.GAME`)
 
-`Game.sector` exists after step 1; before that, use `Game.level` in these
-snippets.
+`Game.sector` replaced `Game.level` in step 1, so these snippets use it.
 
 ```
 GAME.Game.sector = 10; GAME.Terrain.setLevel(10);
@@ -414,13 +448,20 @@ shieldPriceScale: 0.15,
 
 ---
 
-## 15. Open questions
+## 15. Decisions & open questions
+
+Settled before implementation started:
+
+1. **Recurring Octopus stays heat-seeker-only.** The emergency 500-credit
+   top-up is gated to the first campaign Octopus (option A in 8.4). If late
+   octopuses feel like a grind, revisit with a 4th/5th heat stack rather than
+   changing armour mid-implementation.
+2. **Boss missiles are shootable** — one player bullet kills one.
+3. **No "retire"** this pass; dying is how a run ends.
+4. **`moonranger_hi` stays currency**; depth gets its own line
+   (`DEEPEST SECTOR n`) on the title screen.
+
+Still open:
 
 1. Should modifiers stack at sectors 30+? (Recommend: one modifier only, but
-   intensification inside a modifier.)
-2. Should the recurring Octopus stay heat-seeker-only, or should armour alternate
-   by occurrence? (Heat-only plus 25/30 hits may be a big heat-seeker economy
-   requirement.)
-3. Is "retire" wanted as an explicit end to a run for recording depth?
-4. Should `moonranger_hi` switch from currency to deepest sector as the headline
-   record? (Recommend: keep currency, headline depth.)
+   intensification inside a modifier — leave stacking for a later pass.)

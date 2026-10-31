@@ -3,11 +3,12 @@
 An Atari-style 2D side-scrolling survival shooter for the browser. Drive an
 open-top jeep with a mounted gun over increasingly cratered lunar terrain, jump enemy
 fire, and shoot down alien moon rovers and flying saucers. Survive from level 1
-(smooth ground) to level 10 (maximum hills).
+(smooth ground) to level 10 (maximum hills), then keep going into the endless
+Patrol.
 
 Built with plain HTML5 Canvas + JavaScript — **no dependencies, no build step**.
 
-Current version: **v0.0.15** — the full history of every change lives in
+Current version: **v0.1.0** — the full history of every change lives in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## Run locally
@@ -74,9 +75,34 @@ This is a fully static site.
     intermittent cadence. They slam down between you and the creature and
     must be jumped.
   - Boss shots are **tiny copies of the creature**, pulsing as they fly.
-- **Destroy the Octopus to win the run.** There is no level 11.
+- **Destroy the Octopus to save the moon** — but the run no longer ends there.
+  After a short **MOON SAVED** freeze the campaign rolls into the endless
+  **Patrol**: the counter keeps climbing past level 10 as sectors
+  (`SECTOR 11`, `SECTOR 12`, …), enemies spawn denser and shoot faster, and
+  your deepest sector is saved between sessions.
+- **Every Patrol sector carries a modifier**, named in the banner and listed
+  under the HUD:
+  - **METEOR STORM** — rocks every 1–2 s, up to four in the air
+  - **BOMBER WING** — more red ships, dropping bombs twice as often
+  - **AIR RAID** — mostly UFOs, 15% faster
+  - **GROUND SWARM** — mostly rovers, 15% faster
+  - **LOW GRAVITY** — jump higher and hang longer
+  - **ARMORED** — rovers and saucers take two hits
+  - **BLACKOUT** — no stars, no horizon rim, enemies lit brighter
+  - **FAST FORWARD** — the world scrolls 25% faster
+- **The bosses return.** From sector 15 a creature guards every 5th sector,
+  rotating spider → crab → octopus. Each visit is **25% tougher**, and repeat
+  bosses carry elite traits: **FRENZIED** (fires faster) from the second visit,
+  **SHIELDED** (slowly regains health until you hit it again) from the third.
+  A recurring octopus still only takes heat seekers.
 - Each boss pays a 900-credit bounty.
-- Each level the terrain gets hillier and enemies spawn/shoot faster.
+- Each level the terrain gets hillier and enemies spawn/shoot faster. Past
+  sector 10 the hills stop growing (level 10 is the terrain ceiling); difficulty
+  comes from spawn rate, enemy count, fire rate and the sector modifier.
+  Enemies on screen go 4 → 5 (sector 15) → 6 (sector 25), and shot speed caps
+  at 240 px/s so late sectors stay dodgeable.
+- Your **deepest sector** is saved (`moonranger_depth`), alongside the
+  hi-score. Beating the campaign once is remembered too (`moonranger_cleared`).
 - High score is saved in your browser (`localStorage`).
 
 ## Editing
