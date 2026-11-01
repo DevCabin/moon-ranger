@@ -15,7 +15,7 @@
      F              .... toggle fullscreen
      Space / Click  .... start & restart
 
-   See CHANGELOG.md for the version history (current: v0.1.1).
+   See CHANGELOG.md for the version history (current: v0.1.2).
 
    FILE MAP (all sections are in this one file, top to bottom):
      1. CONFIG        — every tunable number lives here (plus MODIFIERS, 1b)
@@ -37,7 +37,7 @@
    ============================================================================ */
 const CONFIG = {
   // Game version — bump with every change (see CHANGELOG.md).
-  version: "0.1.1",
+  version: "0.1.2",
 
   // Internal render resolution. The game is simulated and drawn at this
   // low resolution, then scaled up with crisp pixels for the retro look.
@@ -111,6 +111,7 @@ const CONFIG = {
   priceHeatSeekers: 500,       // homing red missiles until you die
   maxMissileStacks: 3,         // buy up to this many 45° launchers
   maxHeatStacks: 3,            // ... and up to this many heat-seeker banks
+  maxShieldStacks: 3,          // ... and at most 3 small AND 3 large shields (12 hits)
   salvoGap: 0.12,              // seconds between shots inside a stacked volley
   missileInterval: 2.5,        // seconds between auto missile volleys
   missileSpeed: 280,
@@ -486,7 +487,8 @@ function spawnMissile(x, y, heat) {
 function damageJeep() {
   if (Jeep.invuln > 0) return false;
   if (Game.shield > 0) {
-    Game.shield--;
+    if (Game.shieldSmall > 0) Game.shieldSmall--;   // cheap charges soak the hit first
+    else Game.shieldLarge--;
     Jeep.invuln = CONFIG.shieldInvulnTime;
     AudioSys.shieldHit();
     for (let i = 0; i < 14; i++) {           // cyan shield-burst sparks
@@ -802,7 +804,12 @@ const Game = {
   hiScore: Number(localStorage.getItem("moonranger_hi") || 0),
   depth: Number(localStorage.getItem("moonranger_depth") || 0),   // best sector ever
   clearedEver: localStorage.getItem("moonranger_cleared") === "1",
-  shield: 0,             // shield charges (small +1 / large +3)
+  shieldSmall: 0,        // small-shield hits owned (1 each, max CONFIG.maxShieldStacks)
+  shieldLarge: 0,        // large-shield hits owned (3 each, 3 purchases = 9)
+
+  // Total shield hits left, whichever type they came from. Small charges are
+  // spent first (see damageJeep), so a large shield stays intact the longest.
+  get shield() { return this.shieldSmall + this.shieldLarge; },
   shopFlash: 0,          // "not enough currency" warning timer
   roverCycle: 0,         // next ground-rover colorway index
   sector: 1,             // unbounded run counter (levels 1-10, then Patrol)
@@ -989,7 +996,8 @@ const Game = {
     this.flash = 0;
     Terrain.setLevel(this.terrainLevel());
     Jeep.reset();
-    this.shield = 0;
+    this.shieldSmall = 0;
+    this.shieldLarge = 0;
     this.shopFlash = 0;
     this.roverCycle = 0;
     this.bossActive = false;
@@ -1064,8 +1072,11 @@ const Game = {
 
 // The buy menu (press B during play). Prices come from CONFIG.
 const SHOP_ITEMS = [
-  { name: "SMALL SHIELD  +1 HIT",  price: () => Game.shieldPrice(CONFIG.priceSmallShield), owned: () => false, apply() { Game.shield += 1; } },
-  { name: "LARGE SHIELD  +3 HITS", price: () => Game.shieldPrice(CONFIG.priceLargeShield), owned: () => false, apply() { Game.shield += 3; } },
+  // Shields stack like ordnance — three small and three large at once, i.e. a
+  // full bank of 12 hits. A purchase only goes through if its whole charge fits,
+  // so a partly-drained large stack never sells you a wasted top-up.
+  { name: "SMALL SHIELD  +1 HIT",  price: () => Game.shieldPrice(CONFIG.priceSmallShield), owned: () => Game.shieldSmall >= CONFIG.maxShieldStacks,    apply() { Game.shieldSmall += 1; } },
+  { name: "LARGE SHIELD  +3 HITS", price: () => Game.shieldPrice(CONFIG.priceLargeShield), owned: () => Game.shieldLarge > CONFIG.maxShieldStacks * 3 - 3, apply() { Game.shieldLarge += 3; } },
   { name: "MISSILES  45 AUTO",     price: () => CONFIG.priceMissiles,    owned: () => Jeep.missiles >= CONFIG.maxMissileStacks,    apply() { Jeep.missiles++; } },
   { name: "HEAT SEEKERS  AUTO",    price: () => CONFIG.priceHeatSeekers, owned: () => Jeep.heatSeekers >= CONFIG.maxHeatStacks, apply() { Jeep.heatSeekers++; } },
 ];
@@ -2371,7 +2382,15 @@ function drawHUD() {
     drawText("SH", px, 14, 1, COLORS.bulletYou);
     px += 8;
     ctx.fillStyle = COLORS.bulletYou;
-    for (let i = 0; i < Game.shield; i++) { ctx.fillRect(px, 15, 2, 3); px += 4; }
+    // A large shield's remaining hits draw as one bar (3 hits = 5 px), small
+    // charges as single pips — so a full bank reads as three bars + three pips.
+    const bars = Math.ceil(Game.shieldLarge / 3);
+    for (let i = 0; i < bars; i++) {
+      const hits = Math.min(3, Game.shieldLarge - i * 3);
+      ctx.fillRect(px, 15, hits * 2 - 1, 3);
+      px += 7;
+    }
+    for (let i = 0; i < Game.shieldSmall; i++) { ctx.fillRect(px, 15, 2, 3); px += 4; }
     px += 3;
   }
   if (Jeep.missiles > 0) {

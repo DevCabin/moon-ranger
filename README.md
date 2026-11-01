@@ -8,7 +8,7 @@ Patrol.
 
 Built with plain HTML5 Canvas + JavaScript — **no dependencies, no build step**.
 
-Current version: **v0.1.1** — the full history of every change lives in
+Current version: **v0.1.2** — the full history of every change lives in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## Run locally
@@ -48,14 +48,18 @@ This is a fully static site.
   kills — rovers = 100, saucers = 150, red ships = 300.
 - Press **B** to open the **buy menu** (the world freezes while you shop).
   Spending is permanent — your currency drops by the price paid.
-  - **Small Shield (100)** — absorbs 1 hit
-  - **Large Shield (300)** — absorbs 3 hits (stacks with small)
+  - **Small Shield (100)** — absorbs 1 hit. Buy up to **3** (3 hits).
+  - **Large Shield (300)** — absorbs 3 hits. Buy up to **3** (9 hits).
+  - Shields stack by type like the ordnance, so a full bank is **12 hits**:
+    three small and three large. Small charges are spent first, and a purchase
+    only goes through if its whole charge fits.
   - **Missiles (300)** — auto-fire at 45° up-right until the run ends. Buy up
     to **3**: every cycle launches one missile per launcher, so 1, 2, 3…
   - **Heat Seekers (500)** — red homing missiles that chase the nearest
     enemy, until the run ends. They stack **3** deep the same way.
-- Shields show as a cyan ring and HUD pips; after a shielded hit you get a
-  second of invulnerability (the jeep blinks).
+- Shields show as a cyan ring and HUD bars (one per large charge) plus pips (one
+  per small); after a shielded hit you get a second of invulnerability (the jeep
+  blinks).
 - Enemy dots are aimed at you — one per enemy at a time. Jump to dodge.
 - **Red bomber saucers** hover across the top and drop big bombs — only a
   direct hit kills you. One visits on level 1, two on level 2, three on

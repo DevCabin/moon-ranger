@@ -166,28 +166,28 @@ if you add a section.
 | # | Section | Start | What it does |
 | --- | --- | --- | --- |
 | 1 | CONFIG | [L38](game.js#L38) | Every tunable number. Rebalancing should not require touching logic. |
-| 1b | MODIFIERS | [L191](game.js#L191) | The eight Patrol sector modifiers and their values. |
-| 2 | PALETTE | [L205](game.js#L205) | `COLORS`, including the five rotating rover colorways and the boss colors. |
-| 3 | AUDIO | [L258](game.js#L258) | `AudioSys`: square-wave beeps and filtered noise, lazily created on first input, mute persisted to `localStorage`. |
-| 4 | INPUT | [L333](game.js#L333) | `Keys` (held) and `Pressed` (edge-triggered) maps, plus helpers. |
-| 5 | TERRAIN | [L371](game.js#L371) | `groundY()` / `slope()` / difficulty `ramp()`. |
-| 6 | ENTITIES | [L406](game.js#L406) | `Jeep` singleton, pools, spawners, bosses, `damageJeep()`, particles. |
+| 1b | MODIFIERS | [L192](game.js#L192) | The eight Patrol sector modifiers and their values. |
+| 2 | PALETTE | [L206](game.js#L206) | `COLORS`, including the five rotating rover colorways and the boss colors. |
+| 3 | AUDIO | [L259](game.js#L259) | `AudioSys`: square-wave beeps and filtered noise, lazily created on first input, mute persisted to `localStorage`. |
+| 4 | INPUT | [L334](game.js#L334) | `Keys` (held) and `Pressed` (edge-triggered) maps, plus helpers. |
+| 5 | TERRAIN | [L372](game.js#L372) | `groundY()` / `slope()` / difficulty `ramp()`. |
+| 6 | ENTITIES | [L407](game.js#L407) | `Jeep` singleton, pools, spawners, bosses, `damageJeep()`, particles. |
 | 7 | GAME STATE | [L799](game.js#L799) | `Game` object: state string, currency, sector, difficulty helpers, transitions. |
-| 8 | UPDATE | [L1084](game.js#L1084) | The fixed-step simulation. The biggest function in the file. |
-| 9 | RENDER | [L1710](game.js#L1710) | Pixel font, starfield, terrain drawing, all entity drawing, HUD, overlays. |
-| 10 | MAIN LOOP | [L2558](game.js#L2558) | Debug handle, pointer input, fullscreen, letterbox resizing, the frame loop. |
+| 8 | UPDATE | [L1070](game.js#L1070) | The fixed-step simulation. The biggest function in the file. |
+| 9 | RENDER | [L1714](game.js#L1714) | Pixel font, starfield, terrain drawing, all entity drawing, HUD, overlays. |
+| 10 | MAIN LOOP | [L2525](game.js#L2525) | Debug handle, pointer input, fullscreen, letterbox resizing, the frame loop. |
 
 ### Reading order recommendation
 
 1. `CONFIG` → `MODIFIERS` → `COLORS`: learn the vocabulary. Half the game is names and
    numbers.
-2. `Terrain.groundY()` ([L371](game.js#L371)): 15 lines, and suddenly hills make sense.
-3. `Jeep` ([L406](game.js#L406)): the player's whole data model.
-4. `Game` ([L799](game.js#L799)): the state machine, the sector helpers, the transitions.
-5. `update()` ([L1084](game.js#L1084)): read it in phases; don't try to hold 600 lines at once.
-6. `drawText()` + `render()` ([L1725](game.js#L1725), [L1752](game.js#L1752)): there is no
+2. `Terrain.groundY()` ([L372](game.js#L372)): 15 lines, and suddenly hills make sense.
+3. `Jeep` ([L407](game.js#L407)): the player's whole data model.
+4. `Game` ([L801](game.js#L801)): the state machine, the sector helpers, the transitions.
+5. `update()` ([L1097](game.js#L1097)): read it in phases; don't try to hold 600 lines at once.
+6. `drawText()` + `render()` ([L1738](game.js#L1738), [L1765](game.js#L1765)): there is no
    `ctx.fillText` anywhere — all text is a hand-drawn 3×5 bitmap font.
-7. `frame()` ([L2572](game.js#L2572)): the loop, and you're done.
+7. `frame()` ([L2593](game.js#L2593)): the loop, and you're done.
 
 ## 6. Coordinate systems and hitboxes
 
@@ -230,7 +230,7 @@ wheels extend ~6 px below it, and the ground contact point used for tilting is
 
 ### The `Game` singleton
 
-Everything that survives a frame lives on `Game` ([L799](game.js#L799)) or `Jeep`.
+Everything that survives a frame lives on `Game` ([L801](game.js#L801)) or `Jeep`.
 Highlights:
 
 | Field | Meaning |
@@ -245,7 +245,7 @@ Highlights:
 | `depth` | Best sector ever reached, persisted to `localStorage.moonranger_depth` |
 | `score` | Currency. A float; always display with `Math.floor`. |
 | `hiScore` | Peak currency, persisted to `localStorage.moonranger_hi` |
-| `shield` | Shield charges (small +1, large +3) |
+| `shieldSmall`, `shieldLarge` | Shield hits owned — small 1 per purchase (max 3), large 3 per purchase (max 9). `Game.shield` is a **getter** summing them (max 12); small charges are spent first in `damageJeep()`. |
 | `worldOffset` | Total pixels scrolled; feeds all terrain sampling |
 | `bomberSchedule`, `bomberIdx`, `levelElapsed` | Per-sector red-ship timeline |
 | `Jeep.missiles`, `Jeep.heatSeekers` | Bought stacks (0–3); each stack adds a shot per volley |
@@ -257,7 +257,7 @@ Highlights:
 ### Entities and pools
 
 There are three pools — bullets, enemies, sparks — created by
-[`makePool()`](game.js#L456). Objects are never allocated during play:
+[`makePool()`](game.js#L457). Objects are never allocated during play:
 
 ```js
 const b = bulletPool.get();   // reuse or create
@@ -280,13 +280,16 @@ budget for it explicitly instead of removing that check.
 
 ### The death path
 
-All player damage funnels through [`damageJeep()`](game.js#L486):
+All player damage funnels through [`damageJeep()`](game.js#L487):
 
 ```
 invulnerable?  → ignore
-shield > 0     → consume a charge, 1 s invulnerability, blink
+shield > 0     → spend one hit (small charges first), 1 s invulnerability, blink
 otherwise      → explode, Game.gameOver()
 ```
+
+`Game.shield` is a **getter** for `shieldSmall + shieldLarge`, not a stored field —
+assigning to it throws in strict mode. Set the two counters instead.
 
 Called by: enemy bullets, ground-rover rams, bombs, rolling meteors. If you add a new
 hazard, call this — never set the state to `"gameover"` directly.
@@ -295,13 +298,13 @@ hazard, call this — never set the state to `"gameover"` directly.
 
 Campaign bosses guard sectors 3, 7 and 10 (`CONFIG.bosses`). Patrol bosses return every
 5 sectors from 15. Both paths go through
-[`bossForSector(sector)`](game.js#L574), which returns a resolved descriptor
+[`bossForSector(sector)`](game.js#L576), which returns a resolved descriptor
 (`kind`, `name`, size, `hover`, `heatOnly`, `occurrence`, `recurring`, elite flags) or
 `null`. Everything else — the finish-line hold, the modifier exclusion, `spawnBoss()` —
 asks that function, so the schedule lives in exactly one place.
 
 - `update()` holds the finish line while `bossForSector(Game.sector)` is non-null and
-  `Game.bossDefeated` is false, calling [`spawnBoss()`](game.js#L637) once. That is what
+  `Game.bossDefeated` is false, calling [`spawnBoss()`](game.js#L639) once. That is what
   stops the sector advancing.
 - A boss is an ordinary entry in `enemies` with `type: "boss"`, so drawing, collision and
   homing reuse the existing loops. It carries `bossKind` (`spider` / `crab` /
@@ -314,18 +317,18 @@ asks that function, so the schedule lives in exactly one place.
   a second-visit spider is 38–75 and a second-visit octopus is 25.
 - Elite traits are set from `occurrence`: `frenzied` from the 2nd (aimed shots at
   `bossFrenzyFireScale` = 0.75× the gap), `shielded` from the 3rd (regains 1 HP every
-  `bossShieldRegen` = 6 s, and [`damageBoss()`](game.js#L691) resets that timer on every
+  `bossShieldRegen` = 6 s, and [`damageBoss()`](game.js#L693) resets that timer on every
   hit). The HUD prints `e.elite` next to the boss name.
 - `damageBoss(e, fromHeat)` is the single damage gate: it rejects non-heat hits on a
   `heatOnly` boss, decrements HP, restarts the shield clock, pays the bounty on death,
   and then either calls `Game.milestone()` (first octopus) or `nextLevel()`.
 - Boss shots copy `bossKind` onto the bullet at spawn (so it survives the boss dying and
-  being pooled) and draw through [`drawBossBullet()`](game.js#L2248) as a miniature of the
+  being pooled) and draw through [`drawBossBullet()`](game.js#L2261) as a miniature of the
   creature with a pulsing halo.
 - While `Game.bossActive`, scroll drops to `bossScrollFactor` and regular spawning and
   bomber arrivals are skipped. Meteorites keep falling on their own faster cadence
   (`bossMeteorMinGap`/`MaxGap`) and land between the jeep and the creature.
-- The health bar lives in [`drawHUD()`](game.js#L2363) and only draws during `play`,
+- The health bar lives in [`drawHUD()`](game.js#L2376) and only draws during `play`,
   `pause` and `shop`.
 - Patrol bosses also fire ordnance (`e.ord`, the separate `foeMissiles` array);
   the ladder, the tuning notes and the shoot-down rules are in
@@ -382,6 +385,10 @@ Other fixed numbers worth knowing:
 - **Shop:** small shield 100, large shield 300, missiles 300, heat seekers 500. Missiles
   auto-fire every 2.5 s; heat seekers every 1.8 s and steer at 4.6 rad/s. Both stack up
   to 3, and each cycle fires one shot per stack (1, 2, 3) spaced by `salvoGap`.
+- **Shield banking:** three small (+1 each) and three large (+3 each) may be held at once
+  — a full bank is 12 hits, and a purchase only lands if the whole charge fits
+  (`owned()` refuses at `shieldLarge > 6`). Small charges absorb first, so damage frees
+  small slots before large ones.
 - **Bosses:** campaign 3/7/10; Patrol every 5 from 15. Spider and crab take 30–60 hits
   (+25% per repeat); the octopus 20 heat-seeker hits (+25% per repeat). Each pays 900.
   While one is alive the scroll drops to 35%, the finish line holds, and meteorites fall
@@ -429,7 +436,7 @@ Do **not** start a third place that does its own `sector` arithmetic.
 
 ### Modifiers
 
-`MODIFIERS` ([L191](game.js#L191)) is a flat table; ids are the keys and are stored in
+`MODIFIERS` ([L192](game.js#L192)) is a flat table; ids are the keys and are stored in
 `Game.modifier`:
 
 ```js
@@ -445,7 +452,7 @@ const MODIFIERS = {
 };
 ```
 
-Selection happens in [`pickModifier()`](game.js#L846), called by `nextLevel()` **before**
+Selection happens in [`pickModifier()`](game.js#L853), called by `nextLevel()` **before**
 `scheduleBombers()` (the bomber schedule depends on scroll speed, which depends on the
 modifier):
 
@@ -505,7 +512,7 @@ you hit. Change that number only with a dodge test (harness in
 
 ### The milestone, and why it is not a state
 
-The first octopus death calls `Game.milestone()` ([L1018](game.js#L1018)) instead of
+The first octopus death calls `Game.milestone()` ([L1028](game.js#L1028)) instead of
 `nextLevel()`:
 
 1. `cleared = true`, `moonranger_cleared` persisted (first time only).
@@ -517,7 +524,7 @@ ignored — deliberately, like the game-over screen. When it expires, `clearPres
 and `nextLevel()` moves to sector 11 with the `PATROL BEGINS` banner (once per run, via
 `patrolAnnounced`).
 
-`render()` draws [`drawMilestone()`](game.js#L2488) whenever `winFlash > 0`, before the
+`render()` draws [`drawMilestone()`](game.js#L2509) whenever `winFlash > 0`, before the
 banner branch. There is no `"victory"` state any more.
 
 ### Persistence
@@ -534,7 +541,7 @@ banner branch. There is no `"victory"` state any more.
 ## 10. Debugging and testing recipes
 
 There are no tests, so the fastest way to verify behavior is from the devtools console.
-The game exposes a handle ([L2558](game.js#L2558)):
+The game exposes a handle ([L2579](game.js#L2579)):
 
 ```js
 GAME.Game              // state, score, sector, distance, modifier, depth...
@@ -574,8 +581,8 @@ GAME.Game.modifier = "meteor"; GAME.Game.scheduleBombers();
 // Skip to the next sector immediately
 GAME.Game.distance = GAME.CONFIG.levelLength * GAME.Game.sector + 1;
 
-// Shopping spree / free shields
-GAME.Game.score = 5000; GAME.Game.shield = 3;
+// Shopping spree / a full 12-hit shield bank
+GAME.Game.score = 5000; GAME.Game.shieldSmall = 3; GAME.Game.shieldLarge = 9;
 
 // Force a spawn on the next frame
 GAME.Game.spawnTimer = 0;
@@ -618,19 +625,19 @@ and the Patrol caps (`scrollCap`, `spawnScaleFloor`, `fireScaleFloor`,
 ### Add a new ground enemy
 
 1. Add its colors to `COLORS`.
-2. Add a `type` branch in [`spawnEnemy()`](game.js#L521): set `w`, `h`, `y`,
+2. Add a `type` branch in [`spawnEnemy()`](game.js#L523): set `w`, `h`, `y`,
    `fireTimer`, and any `hp`. Set `hp`/`maxHp` explicitly even if it is 1 — pooled
    objects keep old values.
 3. Add its movement in the enemies loop of `update()`, and make sure its `y` is re-snapped
    to `Terrain.groundY(...)` if it walks.
-4. Add a `drawEnemy()` branch ([L1983](game.js#L1983)) using `Math.round(x)`/`Math.round(y)`.
+4. Add a `drawEnemy()` branch ([L1996](game.js#L1996)) using `Math.round(x)`/`Math.round(y)`.
 5. Add its currency value in **both** hit paths (player bullets and missiles).
 6. Bump the version, update the README rules, add a CHANGELOG entry.
 
 ### Add a shop item
 
 1. Price in `CONFIG`; an ownership getter and `apply()` in
-   [`SHOP_ITEMS`](game.js#L1064).
+   [`SHOP_ITEMS`](game.js#L1074).
 2. That's it for buying — `buyShopItem()` and `drawShop()` iterate the array.
 3. **Layout caveat:** `drawShop()` positions rows at `112 + i * 13` and prints the
    "can't buy" warning at y 172. A fifth item lands at y 164 and crowds that warning, and
@@ -652,7 +659,7 @@ and the Patrol caps (`scrollCap`, `spawnScaleFloor`, `fireScaleFloor`,
 
 ### Add a HUD string
 
-Use only glyphs in the `FONT` table ([L1710](game.js#L1710)): `A–Z`, `0–9`, space, and
+Use only glyphs in the `FONT` table ([L1723](game.js#L1723)): `A–Z`, `0–9`, space, and
 `- + ! . : / > <`. Uppercase everything; unknown characters are silently skipped (you'll
 get a gap in the text). If you need a new character, add a 3×5 glyph there — each row is
 a 3-bit mask with the most significant bit on the left. `+` was added for the elite boss
@@ -675,7 +682,7 @@ labels; an em dash is still missing.
 - **Tuning numbers go in `CONFIG`/`MODIFIERS`/`COLORS`**, not inline in logic.
 - **One semantic version bump per change**, in three places: `CONFIG.version`
   ([L40](game.js#L40)), the "current version" line in the README, and a new CHANGELOG
-  entry at the top. They are currently in sync at 0.1.1; keep them that way.
+  entry at the top. They are currently in sync at 0.1.2; keep them that way.
 - **Keep the file map and section banners accurate** if you add a section.
 - **The README is player-facing.** If a change is visible to players (rules, controls,
   new enemies, modifiers), update it in the same pass.
@@ -708,6 +715,10 @@ labels; an em dash is still missing.
 11. **Any enemy with `hp > 1` must be handled in both hit paths.** Player bullets and
     missiles each carry their own collision block; ARMORED is what made that a
     requirement, and forgetting one makes armoured enemies unkillable or free kills.
+12. **Don't write to `Game.shield`.** It is a getter over `shieldSmall` and
+    `shieldLarge`; an assignment throws under `"use strict"`. Everything else (the HUD,
+    the cyan ring, `damageJeep()`) reads the getter, which is why the cap lives in the
+    shop's `owned()` checks rather than in the pool itself.
 
 ## 13. Deploying
 

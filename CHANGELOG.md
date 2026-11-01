@@ -6,6 +6,22 @@ The versions below map one-to-one to the conversation in which the game was buil
 
 ---
 
+## [0.1.2] — Shields stack like ordnance
+
+- Shields now cap out the same way missiles do: at most **three small** (+1
+  each) and **three large** (+3 each) owned at once, for a full bank of **12
+  hits**. Previously they stacked with no limit at all.
+- A purchase only goes through if the whole charge fits, so a partly-drained
+  large stack never sells you a wasted 300-credit top-up and the bank can never
+  exceed 12. Damaged charges free their slot again as soon as they are spent.
+- Small charges soak a hit before large ones, so a large shield stays intact the
+  longest.
+- The HUD draws each large charge as a bar (3 hits, shrinking as it drains) and
+  each small one as a pip, so the composition of the bank is readable at a
+  glance.
+- The buy menu marks both shield rows **MAX** when no further charge fits, like
+  the missiles and heat seekers.
+
 ## [0.1.1] — Boss ordnance
 
 - Patrol bosses now throw ordnance as well as aimed shots: **1 aimed missile**
