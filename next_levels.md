@@ -1,7 +1,9 @@
 # Next Steps — Endless Patrol (post-level-10)
 
-**Status:** complete as of `0.1.1`. All eight steps of section 12 are implemented,
-  tested in the browser, documented and released. Kept as design rationale.
+**Status:** complete as of `0.1.2`. All eight steps of section 12 are implemented,
+  tested in the browser, documented and released, plus the follow-ups added since:
+  boss ordnance (8.2), depth-scaled shield prices, and the 3+3 shield cap in 9.
+  Kept as design rationale.
 **Target version:** `0.1.0` (new mode, not a patch). `CONFIG.version` is still
   `0.0.15`; it gets bumped in step 8.
 **Build before this work:** `0.0.15` — 10 levels, bosses at 3/7/10, Octopus
@@ -304,7 +306,11 @@ and update `SHOP_ITEMS` ownership checks + HUD.
 Money stops mattering once shields and both ordnance stacks are maxed. Add sinks:
 
 - **Shield prices scale with depth**: `price = base * (1 + 0.15 * (sector - 10))`,
-  rounded to 10s. Small 100→115 at 11, large 300→345.
+  rounded half-up to 10s (plain `Math.round` gives 110 here, because `100 * 1.15`
+  is `114.999…`). Small 100→120 at 11, large 300→350; 180/530 at 15, 330/980 at 25.
+- **Shield stacking is capped like the ordnance** (implemented): at most 3 small
+  (+1 each) and 3 large (+3 each), a 12-hit bank, and a purchase only lands if its
+  whole charge fits.
 - Optional: repairs are already shields; do not add a separate HP system.
 - Track total spend? Not needed.
 
@@ -422,7 +428,9 @@ Checklist:
 - [ ] Player bullets destroy a boss missile.
 - [ ] Boss missiles disappear when the boss dies and on restart.
 - [ ] Octopus #2 does not hand out 500 credits again.
-- [ ] Shield prices rise past sector 10.
+- [ ] Shield prices rise past sector 10 (120/350 at 11, 180/530 at 15).
+- [ ] Shields cap at 3 small + 3 large (12 hits); both rows read `MAX` at the cap
+      and a large refused at 7+ large hits is never charged.
 - [ ] Death saves depth; game over shows sector reached.
 - [ ] `node --check game.js`, console clean, no stale pooled fields.
 - [ ] Enemy count / projectile count stays bounded at sector 40 (performance).
