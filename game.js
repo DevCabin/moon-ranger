@@ -15,7 +15,7 @@
      F              .... toggle fullscreen
      Space / Click  .... start & restart
 
-   See CHANGELOG.md for the version history (current: v0.1.2).
+   See CHANGELOG.md for the version history (current: v0.1.3).
 
    FILE MAP (all sections are in this one file, top to bottom):
      1. CONFIG        — every tunable number lives here (plus MODIFIERS, 1b)
@@ -37,7 +37,7 @@
    ============================================================================ */
 const CONFIG = {
   // Game version — bump with every change (see CHANGELOG.md).
-  version: "0.1.2",
+  version: "0.1.3",
 
   // Internal render resolution. The game is simulated and drawn at this
   // low resolution, then scaled up with crisp pixels for the retro look.

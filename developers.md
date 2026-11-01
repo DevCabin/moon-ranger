@@ -10,7 +10,7 @@ campaign runs from level 1 to the level-10 octopus, then continues into an endle
 **Patrol** of sectors.
 
 **What the codebase is:** four source files and four docs. No framework, no bundler, no
-package manager, no dependencies, no build step, no tests. `game.js` is ~2,390 lines of
+package manager, no dependencies, no build step, no tests. `game.js` is ~2,600 lines of
 plain JavaScript in one file, organized into ten numbered sections.
 
 ---
@@ -89,9 +89,10 @@ node --check game.js     # syntax
 
 | File | Lines | What it holds |
 | --- | --- | --- |
-| [game.js](game.js) | ~2,390 | The entire game. Read this; everything else is a shell. |
-| [index.html](index.html) | 15 | One `<canvas id="game">` and a classic (non-module) `<script src="game.js">`. |
+| [game.js](game.js) | ~2,600 | The entire game. Read this; everything else is a shell. |
+| [index.html](index.html) | 18 | One `<canvas id="game">` and a classic (non-module) `<script src="game.js">`. |
 | [style.css](style.css) | 28 | Full-window black page, pixelated canvas scaling. No game logic. |
+| [favicon.svg](favicon.svg) | 85 | The pixel moon in the browser tab. Static art, unrelated to the game loop. |
 | [vercel.json](vercel.json) | 6 | Marks the folder as a static deployment with no build. |
 | [README.md](README.md) | — | Player-facing rules, controls, and deployment notes. |
 | [CHANGELOG.md](CHANGELOG.md) | — | One entry per change, with a version bump each time. |
@@ -104,10 +105,22 @@ Two facts worth internalizing:
   `import`/`export`, and top-level declarations are one shared scope. Don't convert it to
   `type="module"` casually: module scripts are deferred (load timing changes) and run in
   strict module scope, which would hide `window.GAME` unless explicitly assigned.
-- **There are no hidden assets.** Audio is synthesized with WebAudio oscillators, the
-  font is a 3×5 bitmap table in code, and stars/craters are generated. Adding art or a
-  sound file would be the first binary asset in the repo — a deliberate design choice to
-  keep it this small.
+- **There are no binary assets.** Audio is synthesized with WebAudio oscillators, the
+  font is a 3×5 bitmap table in code, and stars/craters are generated. `favicon.svg` is
+  the one piece of static art, and it is text for exactly this reason. Dropping in a
+  `.png`, `.ico` or `.wav` would be the first binary file in the repo — a deliberate
+  design choice to keep it this small.
+
+### The favicon
+
+[favicon.svg](favicon.svg) is a hand-placed 16×16 pixel moon: a `viewBox="0 0 16 16"`
+with `shape-rendering: crispEdges`, filled by 1×1 `<rect>`s that are merged into
+horizontal runs (one rect per unbroken colour, per scanline). Nothing generates it at
+runtime and no code reads it. To change the art, edit the rects by hand or rebuild it
+from an ASCII map — five greys, one char each: highlight `#e8e8f4`, rim `#d8d8e8`,
+rock `#9a9aa8`, shadow `#5c5c66`, crater `#3c3c46`, sky `#02020c` (the same lunar greys
+as `COLORS` in `game.js`). Keep the disc inside the 16-unit box and the top and bottom
+rows of sky, or the moon stops looking round in a small tab.
 
 ## 4. How one frame works
 
@@ -682,7 +695,7 @@ labels; an em dash is still missing.
 - **Tuning numbers go in `CONFIG`/`MODIFIERS`/`COLORS`**, not inline in logic.
 - **One semantic version bump per change**, in three places: `CONFIG.version`
   ([L40](game.js#L40)), the "current version" line in the README, and a new CHANGELOG
-  entry at the top. They are currently in sync at 0.1.2; keep them that way.
+  entry at the top. They are currently in sync at 0.1.3; keep them that way.
 - **Keep the file map and section banners accurate** if you add a section.
 - **The README is player-facing.** If a change is visible to players (rules, controls,
   new enemies, modifiers), update it in the same pass.
@@ -727,7 +740,8 @@ The whole folder is the artifact — there is no build output and no environment
 - **Vercel CLI:** run `vercel` in the project root, accept the defaults (framework
   *Other*, no build command, output `./`).
 - **Vercel dashboard:** import the folder/repo; `vercel.json` already pins it as static.
-- **Any other static host:** upload `index.html`, `style.css`, `game.js`, and the docs.
+- **Any other static host:** upload `index.html`, `style.css`, `game.js`, `favicon.svg`,
+  and the docs.
   No server-side code, no routing, no secrets.
 
 Cache-busting is manual: the script URL is unversioned, so after deploying, hard-refresh

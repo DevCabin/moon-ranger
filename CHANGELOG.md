@@ -6,6 +6,17 @@ The versions below map one-to-one to the conversation in which the game was buil
 
 ---
 
+## [0.1.3] — Pixel moon favicon
+
+- The browser tab now shows a chunky **pixel-art moon** instead of the default
+  blank page icon: a 16×16 disc lit from the upper left, complete with two
+  craters, drawn in the same lunar greys as the game's terrain.
+- It is a single hand-placed `favicon.svg` — 1×1 rects on a 16-unit grid with
+  `shape-rendering: crispEdges` — so it stays sharp at any tab size, needs no PNG
+  or `.ico`, and weighs under 5 KB of text with no binary asset to keep in sync.
+- `index.html` links it with `rel="icon" type="image/svg+xml"`. Everything else
+  about the deploy is unchanged: still no build step, still a static folder.
+
 ## [0.1.2] — Shields stack like ordnance
 
 - Shields now cap out the same way missiles do: at most **three small** (+1

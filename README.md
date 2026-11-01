@@ -8,7 +8,7 @@ Patrol.
 
 Built with plain HTML5 Canvas + JavaScript — **no dependencies, no build step**.
 
-Current version: **v0.1.2** — the full history of every change lives in
+Current version: **v0.1.3** — the full history of every change lives in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## Run locally
@@ -130,6 +130,7 @@ Files:
 | File | Purpose |
 | --- | --- |
 | `index.html` | Page shell, loads the canvas and script |
+| `favicon.svg` | The pixel moon in the browser tab (16×16, plain SVG, no PNG needed) |
 | `style.css` | Page chrome (fills window, crisp pixels) |
 | `game.js` | The entire game (config → audio → input → terrain → entities → state → update → render → loop) |
 | `vercel.json` | Marks the project as a static deployment |
